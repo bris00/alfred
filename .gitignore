@@ -1,3 +1,4 @@
 /node_modules
 /dist
-/prod.local.env
+/*.local.env
+/database.sqlite

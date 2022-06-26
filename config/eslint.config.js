@@ -43,6 +43,9 @@ module.exports = {
                 "plugin:@typescript-eslint/recommended-requiring-type-checking",
                 "plugin:import/typescript",
             ],
+            rules: {
+                "@typescript-eslint/require-await": "error",
+            },
         },
         {
             files: ["src/**/*.test.ts"],
@@ -54,5 +57,5 @@ module.exports = {
             },
         },
     ],
-    ignorePatterns: ["node_modules", "dist"],
+    ignorePatterns: ["node_modules", "dist", "Tiltfile"],
 };

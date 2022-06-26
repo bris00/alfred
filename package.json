@@ -4,20 +4,28 @@
   "version": "0.1.0",
   "description": "",
   "scripts": {
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "npm run bundle",
+    "prebundle": "rimraf dist",
     "prebuild": "rimraf dist",
-    "build": "tsup src --format esm --dts",
-    "prestart": "npm run build",
-    "start": "node dist/alfred.mjs",
-    "valid": "concurrently \"npm:valid:test\" \"npm:valid:types\" \"npm:valid:lint\"",
-    "valid:types": "tsc --noEmit",
-    "valid:test": "jest --config config/jest.config.js",
-    "prevalid:examples": "npm run build",
-    "valid:lint": "eslint . --max-warnings=0",
-    "lint:fix": "npm run valid:lint -- --fix"
+    "build": "tsup src --format cjs --sourcemap inline",
+    "bundle": "tsup src --format cjs --minify",
+    "start": "nodemon --watch 'src/**/*' --ext 'ts,json' --exec \"npm run build && node dist/alfred.js\"",
+    "test": "concurrently npm:test:*",
+    "test:types": "tsc --noEmit",
+    "test:unit": "jest --config config/jest.config.js",
+    "test:lint": "eslint . --max-warnings=0",
+    "lint:fix": "npm run test:lint -- --fix"
   },
   "author": "Bris",
   "license": "MIT",
+  "dependencies": {
+    "discord.js": "^12.5.1",
+    "fuzzysort": "^1.1.4",
+    "nodemon": "^2.0.18",
+    "sequelize": "^6.5.0",
+    "sqlite3": "^5.0.1",
+    "sugar": "^2.0.6"
+  },
   "devDependencies": {
     "@commitlint/cli": "^11.0.0",
     "@commitlint/config-conventional": "^11.0.0",
@@ -28,6 +36,7 @@
     "commitizen": "4.2.2",
     "concurrently": "^5.3.0",
     "cz-conventional-changelog": "^3.3.0",
+    "dotenv": "^8.2.0",
     "esbuild-jest": "^0.3.0-beta.0",
     "eslint": "7.13.0",
     "eslint-config-prettier": "^6.15.0",
@@ -65,8 +74,5 @@
     "commitizen": {
       "path": "./node_modules/cz-conventional-changelog"
     }
-  },
-  "dependencies": {
-    "discord.js": "^12.5.1"
   }
 }
