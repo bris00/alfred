@@ -1,4 +1,5 @@
 import { embed } from "@/alfred";
+import { ReactionInstanceList } from "@/reactions";
 import { Context } from "..";
 import { Square } from "../interfaces/square";
 
@@ -9,14 +10,14 @@ export class Start implements Square {
         return "Start";
     }
 
-    async display() {
-        return {
+    display() {
+        return Promise.resolve({
             embed: embed(),
-            reactions: [],
-        };
+            reactions: ReactionInstanceList.create([]),
+        });
     }
 
-    async land(_context: Context) {
-        return [];
+    land(_context: Context) {
+        return Promise.resolve([]);
     }
 }

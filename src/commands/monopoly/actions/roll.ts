@@ -1,14 +1,17 @@
 import { Result } from "@/result";
 import {
     DMChannel,
+    MessageEmbed,
     NewsChannel,
+    PartialDMChannel,
     PartialUser,
     TextChannel,
+    ThreadChannel,
     User,
+    VoiceChannel,
 } from "discord.js";
 import { DICE, MAX_SQUARES } from "..";
 import { DEEDS } from "../squares/deeds";
-import { addReactions, Reaction } from "../reactions";
 import { COMMUNITY_CHESTS } from "../squares/chest";
 import { choose, getContext } from "./common";
 import { GoToJail, Jail } from "../squares/jail";
@@ -18,6 +21,8 @@ import { embed } from "@/alfred";
 import { jail } from "./jail";
 import { RAILROADS } from "../squares/railroad";
 import { Option } from "@/option";
+import { ReactionInstanceList } from "@/reactions";
+import { rollAgain } from "../reactions";
 
 export const SQUARES: Record<number, Square | undefined> = {};
 
@@ -41,20 +46,25 @@ const DEFAULT_ACTION: Square = {
     searchTerm() {
         return "";
     },
-    display: async ({}) => ({
-        reactions: [],
-        embed: embed().addField("Generic square", "Nothing to see here"),
-    }),
-    async land() {
-        return [];
-    },
+    display: () =>
+        Promise.resolve({
+            reactions: ReactionInstanceList.create([]),
+            embed: embed().addField("Generic square", "Nothing to see here"),
+        }),
+    land: () => Promise.resolve([]),
 };
 
 export async function roll(
     user: User | PartialUser,
-    channel: TextChannel | DMChannel | NewsChannel
+    channel:
+        | TextChannel
+        | DMChannel
+        | NewsChannel
+        | PartialDMChannel
+        | ThreadChannel
+        | VoiceChannel
 ): Promise<Result<void, string>> {
-    const reactions: Reaction[] = [];
+    const reactions = ReactionInstanceList.create([]);
 
     const context = await getContext(user.id, channel);
 
@@ -69,7 +79,7 @@ export async function roll(
     }
 
     let info = "";
-    let card;
+    let card: MessageEmbed | undefined;
 
     const roll1 = choose(DICE);
     const roll2 = choose(DICE);
@@ -114,7 +124,7 @@ export async function roll(
         const res = await square.display({ game, channel });
 
         card = res.embed;
-        reactions.push(...res.reactions);
+        reactions.extend(res.reactions);
 
         const fields = await square.land({ player, game, channel });
         card.addFields(...fields);
@@ -123,8 +133,8 @@ export async function roll(
     if (player.doubleStreak > 0 && player.jailed === 0) {
         info += "Rolled doubles, you may go again\n";
 
-        reactions.push({
-            reaction: "rollAgain",
+        reactions.add({
+            reaction: rollAgain,
             args: [],
         });
     } else {
@@ -136,11 +146,11 @@ export async function roll(
     await player.save();
 
     card = card || embed();
-    card.setTitle(`${user.username} rolling`);
+    card.setTitle(`${user.username || "unknown user"} rolling`);
     card.setDescription(`Rolled ${roll1} and ${roll2}\n${info}`);
 
-    const sent = await channel.send(card);
-    await addReactions(game, sent, reactions);
+    const sent = await channel.send({ embeds: [card] });
+    await reactions.addToMessage(sent);
 
-    return Result.ok(void 0);
+    return Result.ok(undefined);
 }

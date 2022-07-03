@@ -91,6 +91,14 @@ export class Result<T, E> {
     //     }
     // }
 
+    mapErr<R>(fn: (x: E) => R): Result<T, R> {
+        if (this.inner.tag === ERR) {
+            return Result.err(fn(this.inner.err));
+        } else {
+            return Result.ok(this.inner.ok);
+        }
+    }
+
     // or(x: T): T {
     //     if (this.inner === NONE) {
     //         return x;

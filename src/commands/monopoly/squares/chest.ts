@@ -3,6 +3,7 @@ import { MonopolyPlayer } from "@/database/monopoly";
 import { Context } from "..";
 import { Square } from "../interfaces/square";
 import { advanceTo, draw, shuffle } from "../actions/common";
+import { ReactionInstanceList } from "@/reactions";
 
 class Chest implements Square {
     square!: number;
@@ -15,11 +16,11 @@ class Chest implements Square {
         return "Community chest";
     }
 
-    async display() {
-        return {
-            reactions: [],
+    display() {
+        return Promise.resolve({
+            reactions: ReactionInstanceList.create([]),
             embed: embed().addField("Community chest", "A random surprise"),
-        };
+        });
     }
 
     async land({ player, game }: Context) {

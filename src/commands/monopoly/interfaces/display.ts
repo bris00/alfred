@@ -1,8 +1,11 @@
+import { ReactionInstanceList } from "@/reactions";
 import { MessageEmbed } from "discord.js";
 import { Context } from "..";
-import { Reaction } from "../reactions";
 
-export type DisplayResult = { embed: MessageEmbed; reactions: Reaction[] };
+export type DisplayResult = {
+    embed: MessageEmbed;
+    reactions: ReactionInstanceList;
+};
 
 export interface Display {
     display(ctx: Omit<Context, "player">): Promise<DisplayResult>;

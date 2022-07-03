@@ -2,6 +2,7 @@
     "compilerOptions": {
         "strict": true,
         "downlevelIteration": true,
+        "skipLibCheck": true,
         "isolatedModules": true,
         "noUnusedLocals": true,
         "noUnusedParameters": true,
@@ -23,5 +24,5 @@
     },
     "include": [
         "src"
-    ]
+    ],
 }

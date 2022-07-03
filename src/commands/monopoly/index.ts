@@ -1,9 +1,11 @@
 import {
-    Client,
     DMChannel,
     Message,
     NewsChannel,
+    PartialDMChannel,
     TextChannel,
+    ThreadChannel,
+    VoiceChannel,
 } from "discord.js";
 import { Sequelize } from "sequelize";
 
@@ -12,12 +14,10 @@ import {
     MonopolyGame,
     MonopolyInventory,
     MonopolyDeed,
-    MonopolyReaction,
     MonopolyRailroad,
 } from "@/database/monopoly";
 import { Option } from "@/option";
 import { embed } from "@/alfred";
-import { addReactions, call, REACTION_EMOJIS } from "./reactions";
 import { roll } from "./actions/roll";
 import {
     findChannelCurrentGame,
@@ -25,15 +25,21 @@ import {
     isBank,
     meetsPlayerConditions,
 } from "./actions/common";
-import { search } from "./actions/search";
 import { trade } from "./actions/trade";
+import { search } from "./actions/search";
 
 type MCommand = (msg: Message, args: string[]) => Promise<void>;
 
 export type Context = {
     player: MonopolyPlayer;
     game: MonopolyGame;
-    channel: TextChannel | NewsChannel | DMChannel;
+    channel:
+        | TextChannel
+        | NewsChannel
+        | DMChannel
+        | PartialDMChannel
+        | ThreadChannel
+        | VoiceChannel;
 };
 
 export const MAX_SQUARES = 40;
@@ -42,7 +48,7 @@ export const DICE = [1, 2, 3, 4, 5, 6];
 
 const STARTING_BALANCE = 1500;
 
-export function init(sequelize: Sequelize, client: Client) {
+export async function init(sequelize: Sequelize) {
     MonopolyPlayer.init(MonopolyPlayer.FIELDS, {
         sequelize,
         modelName: "monopoly_player",
@@ -63,28 +69,25 @@ export function init(sequelize: Sequelize, client: Client) {
         modelName: "monopoly_deed",
     });
 
-    MonopolyReaction.init(MonopolyReaction.FIELDS, {
-        sequelize,
-        modelName: "monopoly_reaction",
-    });
-
     MonopolyRailroad.init(MonopolyRailroad.FIELDS, {
         sequelize,
         modelName: "monopoly_railroad",
     });
 
-    MonopolyGame.sync();
-    MonopolyPlayer.sync();
-    MonopolyInventory.sync();
-    MonopolyDeed.sync();
-    MonopolyReaction.sync();
-    MonopolyRailroad.sync();
+    await Promise.all([
+        MonopolyGame.sync(),
+        MonopolyPlayer.sync(),
+        MonopolyInventory.sync(),
+        MonopolyDeed.sync(),
+        MonopolyRailroad.sync(),
+    ]);
 
     const COMMANDS: Record<string, MCommand | undefined> = {
         async help(msg) {
-            await msg.channel.send(
-                embed().setDescription(
-                    "\
+            await msg.channel.send({
+                embeds: [
+                    embed().setDescription(
+                        "\
 A game of monopoly. You may roll once every 12 hours.\n\
 \n\
 ```\n\
@@ -100,8 +103,9 @@ A game of monopoly. You may roll once every 12 hours.\n\
 !monopoly end            End current game\n\
 !monopoly help           Show this help message\n\
 ```"
-                )
-            );
+                    ),
+                ],
+            });
         },
         async game(msg) {
             const game = await findChannelCurrentGame(msg.channel.id);
@@ -136,9 +140,9 @@ A game of monopoly. You may roll once every 12 hours.\n\
                 .unwrap()
                 .display(ctx.unwrap());
 
-            const ans = await msg.channel.send(embed);
+            const ans = await msg.channel.send({ embeds: [embed] });
 
-            await addReactions(ctx.unwrap().game, ans, reactions);
+            await reactions.addToMessage(ans);
         },
         async new(msg) {
             if (!(await isBank(msg.author.id))) {
@@ -300,21 +304,6 @@ A game of monopoly. You may roll once every 12 hours.\n\
             }
         },
     };
-
-    client.on("messageReactionAdd", async (reaction, user) => {
-        if (!user.bot && REACTION_EMOJIS.has(reaction.emoji.name)) {
-            const action = await MonopolyReaction.findOne({
-                where: {
-                    messageId: reaction.message.id,
-                    emoji: reaction.emoji.name,
-                },
-            });
-
-            if (action) {
-                await call(action, user, reaction);
-            }
-        }
-    });
 
     return async (msg: Message, args: string[]) => {
         const command = COMMANDS[args[0]];

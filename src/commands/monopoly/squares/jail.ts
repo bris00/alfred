@@ -1,4 +1,5 @@
 import { embed } from "@/alfred";
+import { ReactionInstanceList } from "@/reactions";
 import { EmbedFieldData } from "discord.js";
 import { Context, JAIL } from "..";
 import { jail } from "../actions/jail";
@@ -11,14 +12,14 @@ export class GoToJail implements Square {
         return "Go to Jail!";
     }
 
-    async display() {
-        return {
+    display() {
+        return Promise.resolve({
             embed: embed().addField(
                 "Go to Jail!",
                 "You're going to jail from here"
             ),
-            reactions: [],
-        };
+            reactions: ReactionInstanceList.create([]),
+        });
     }
 
     async land({ player }: Context) {
@@ -35,14 +36,14 @@ export class Jail implements Square {
         return "Jail";
     }
 
-    async display() {
-        return {
+    display() {
+        return Promise.resolve({
             embed: embed().addField("Jail", "You are visiting the jail"),
-            reactions: [],
-        };
+            reactions: ReactionInstanceList.create([]),
+        });
     }
 
-    async land(_context: Context): Promise<EmbedFieldData[]> {
-        return [];
+    land(_context: Context): Promise<EmbedFieldData[]> {
+        return Promise.resolve([]);
     }
 }

@@ -2,12 +2,13 @@ import { embed, EMPTY_INLINE_FIELD } from "@/alfred";
 import { MonopolyPlayer } from "@/database/monopoly";
 import { Option } from "@/option";
 import { GuildMember } from "discord.js";
-import { goAsync, prepare } from "fuzzysort";
+import { go, prepare } from "fuzzysort";
 import { Context } from "..";
 import { Display } from "../interfaces/display";
 import { dollar } from "./common";
 import { SQUARES } from "./roll";
 import * as Sugar from "sugar";
+import { ReactionInstanceList } from "@/reactions";
 
 const TARGETS: {
     term: Fuzzysort.Prepared | string | undefined;
@@ -68,7 +69,7 @@ function displayMember(member: GuildMember): Display {
                         {
                             name: "Position",
                             inline: true,
-                            value: player?.currentSquare || 0,
+                            value: (player?.currentSquare || 0).toString(),
                         },
                         {
                             name: "Next turn",
@@ -79,7 +80,7 @@ function displayMember(member: GuildMember): Display {
                         },
                         EMPTY_INLINE_FIELD
                     ),
-                reactions: [],
+                reactions: ReactionInstanceList.create([]),
             };
         },
     };
@@ -102,15 +103,15 @@ export async function search(
     const members = await ctx.channel.lastMessage?.guild?.members.fetch({
         query: term,
     });
+
     const memberTargets =
         members?.map((m) => ({
             term: m.displayName,
             displayable: displayMember(m),
         })) || [];
 
-    const results = await goAsync(term, TARGETS.concat(memberTargets), {
+    const results = go(term, TARGETS.concat(memberTargets), {
         limit: 1,
-        allowTypo: true,
         threshold: -Infinity,
         key: "term",
     });

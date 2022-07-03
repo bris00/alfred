@@ -1,19 +1,25 @@
 import { embed, EMPTY_INLINE_FIELD, EMPTY_VALUE, transaction } from "@/alfred";
-import { MonopolyPlayer, MonopolyReaction } from "@/database/monopoly";
+import { AlfredReaction } from "@/database/alfred";
+import { MonopolyPlayer } from "@/database/monopoly";
 import { RemoveMethods } from "@/dataclass";
 import { Option } from "@/option";
+import { ReactionInstanceList } from "@/reactions";
 import { Result } from "@/result";
 import {
     DMChannel,
     Message,
     NewsChannel,
+    PartialDMChannel,
+    PartialMessage,
     PartialUser,
     TextChannel,
+    ThreadChannel,
     User,
+    VoiceChannel,
 } from "discord.js";
 import { go, prepare } from "fuzzysort";
 import { Tradable, TradableArgs, TradableKey } from "../interfaces/trade";
-import { addReactions } from "../reactions";
+import { acceptTrade, cancelTrade } from "../reactions";
 import { DEEDS } from "../squares/deeds";
 import { RAILROADS } from "../squares/railroad";
 import { findMember, getContext, getPlayer } from "./common";
@@ -35,31 +41,54 @@ type TradeItems = {
     to: TradeItem[];
 };
 
-const TRADABLES: Map<TradableKey, Tradable> = new Map();
+let _TRADABLES: Map<TradableKey, Tradable> | null = null;
 
-Object.values(DEEDS).forEach((deed) => TRADABLES.set(deed.key, deed));
-Object.values(RAILROADS).forEach((rr) => TRADABLES.set(rr.key, rr));
+function tradables(): Map<TradableKey, Tradable> {
+    if (_TRADABLES === null) {
+        const tradables = new Map<TradableKey, Tradable>();
 
-const INDEX = [...TRADABLES.values()].flatMap((tradable) =>
-    tradable.itemTerms.map((term) => ({ term: prepare(term), tradable }))
-);
+        Object.values(DEEDS).forEach((deed) => tradables.set(deed.key, deed));
+        Object.values(RAILROADS).forEach((rr) => tradables.set(rr.key, rr));
 
-TRADABLES.set(TradableKey.DOLLAR, {
-    key: TradableKey.DOLLAR,
-    itemTerms: [],
-    displayName: "$",
-    async give({ from, to, amount, transaction }: TradableArgs) {
-        if (from.balance < amount) {
-            throw "Not enough money";
-        }
+        tradables.set(TradableKey.DOLLAR, {
+            key: TradableKey.DOLLAR,
+            itemTerms: [],
+            displayName: "$",
+            async give({ from, to, amount, transaction }: TradableArgs) {
+                if (from.balance < amount) {
+                    throw "Not enough money";
+                }
 
-        from.balance -= amount;
-        to.balance += amount;
+                from.balance -= amount;
+                to.balance += amount;
 
-        await from.save({ transaction });
-        await to.save({ transaction });
-    },
-});
+                await from.save({ transaction });
+                await to.save({ transaction });
+            },
+        });
+
+        _TRADABLES = tradables;
+    }
+
+    return _TRADABLES;
+}
+
+let _INDEX: { term: Fuzzysort.Prepared; tradable: Tradable }[] | null = null;
+
+function index() {
+    if (_INDEX === null) {
+        const index = [...tradables().values()].flatMap((tradable) =>
+            tradable.itemTerms.map((term) => ({
+                term: prepare(term),
+                tradable,
+            }))
+        );
+
+        _INDEX = index;
+    }
+
+    return _INDEX;
+}
 
 export class Trade {
     items: TradeItems;
@@ -80,7 +109,7 @@ export class Trade {
         this.parties = data.parties;
     }
 
-    async click(msg: Message) {
+    async click(msg: Message | PartialMessage) {
         const [yes, no] = await Promise.all([
             msg.reactions.cache.get("✅")?.users.fetch(),
             msg.reactions.cache.get("❌")?.users.fetch(),
@@ -102,7 +131,7 @@ export class Trade {
         }
     }
 
-    async execute(msg: Message) {
+    async execute(msg: Message | PartialMessage) {
         const fromPlayer = await getPlayer(this.parties.from.id, msg.channel);
         const toPlayer = await getPlayer(this.parties.to.id, msg.channel);
 
@@ -116,64 +145,62 @@ export class Trade {
             return;
         }
 
-        await MonopolyReaction.destroy({
+        await AlfredReaction.destroy({
             where: {
                 messageId: msg.id,
             },
         });
 
-        const result = await transaction<string, string>(
-            async (transaction) => {
-                await Promise.all([
-                    ...this.items.from.map(async (item) => {
-                        const tradable = Option.fromMaybeUndef(
-                            TRADABLES.get(item.key)
-                        ).unwrap();
+        const result = await transaction<string>(async (transaction) => {
+            await Promise.all([
+                ...this.items.from.map(async (item) => {
+                    const tradable = Option.fromMaybeUndef(
+                        tradables().get(item.key)
+                    ).unwrap();
 
-                        await tradable.give({
-                            from: fromPlayer.unwrap(),
-                            to: toPlayer.unwrap(),
-                            amount: item.amount,
-                            transaction,
-                        });
-                    }),
-                    ...this.items.to.map(async (item) => {
-                        const tradable = Option.fromMaybeUndef(
-                            TRADABLES.get(item.key)
-                        ).unwrap();
+                    await tradable.give({
+                        from: fromPlayer.unwrap(),
+                        to: toPlayer.unwrap(),
+                        amount: item.amount,
+                        transaction,
+                    });
+                }),
+                ...this.items.to.map(async (item) => {
+                    const tradable = Option.fromMaybeUndef(
+                        tradables().get(item.key)
+                    ).unwrap();
 
-                        await tradable.give({
-                            from: toPlayer.unwrap(),
-                            to: fromPlayer.unwrap(),
-                            amount: item.amount,
-                            transaction,
-                        });
-                    }),
-                ]);
+                    await tradable.give({
+                        from: toPlayer.unwrap(),
+                        to: fromPlayer.unwrap(),
+                        amount: item.amount,
+                        transaction,
+                    });
+                }),
+            ]);
 
-                await msg.edit(this.embed(Status.ACCEPTED));
+            await msg.edit({ embeds: [this.embed(Status.ACCEPTED)] });
 
-                return "Trade complete";
-            }
-        );
+            return "Trade complete";
+        });
 
         if (result.isErr()) {
-            await msg.edit(this.embed(Status.FAILED));
-            msg.channel.send(result.unwrapErr());
+            await msg.edit({ embeds: [this.embed(Status.FAILED)] });
+            await msg.channel.send(result.unwrapErr().toString());
         } else {
-            await msg.edit(this.embed(Status.ACCEPTED));
-            msg.channel.send(result.unwrap());
+            await msg.edit({ embeds: [this.embed(Status.ACCEPTED)] });
+            await msg.channel.send(result.unwrap());
         }
     }
 
-    async cancel(msg: Message) {
-        await MonopolyReaction.destroy({
+    async cancel(msg: Message | PartialMessage) {
+        await AlfredReaction.destroy({
             where: {
                 messageId: msg.id,
             },
         });
 
-        await msg.edit(this.embed(Status.CANCELED));
+        await msg.edit({ embeds: [this.embed(Status.CANCELED)] });
     }
 
     embed(status: Status) {
@@ -181,7 +208,9 @@ export class Trade {
             if (i.key === TradableKey.DOLLAR) {
                 return `$${i.amount}`;
             } else {
-                return `${i.amount}x ${TRADABLES.get(i.key)?.displayName}`;
+                return `${i.amount}x ${
+                    tradables().get(i.key)?.displayName || "?"
+                }`;
             }
         }
 
@@ -233,9 +262,8 @@ function parseTradeString(trade: string): Option<TradeItems> {
             const item = term.match(ITEM_REG);
 
             if (item) {
-                const results = go(item[3], INDEX, {
+                const results = go(item[3], index(), {
                     limit: 1,
-                    allowTypo: true,
                     threshold: -Infinity,
                     key: "term",
                 });
@@ -262,7 +290,13 @@ function parseTradeString(trade: string): Option<TradeItems> {
 
 export async function trade(
     user: User | PartialUser,
-    channel: TextChannel | DMChannel | NewsChannel,
+    channel:
+        | TextChannel
+        | DMChannel
+        | NewsChannel
+        | PartialDMChannel
+        | ThreadChannel
+        | VoiceChannel,
     partner: string,
     trade: string
 ): Promise<Result<void, string>> {
@@ -278,12 +312,13 @@ export async function trade(
         return Result.err(context.unwrapErr());
     }
 
-    const { player, game } = context.unwrap();
+    const { player } = context.unwrap();
 
     const members = await channel.lastMessage?.guild?.members.fetch({
         query: partner,
         limit: 1,
     });
+
     const member = members?.first();
 
     if (!member) {
@@ -328,18 +363,20 @@ export async function trade(
         },
     };
 
-    const msg = await channel.send(new Trade(data).embed(Status.PENDING));
+    const msg = await channel.send({
+        embeds: [new Trade(data).embed(Status.PENDING)],
+    });
 
-    await addReactions(game, msg, [
+    await ReactionInstanceList.create([
         {
-            reaction: "acceptTrade",
+            reaction: acceptTrade,
             args: [data],
         },
         {
-            reaction: "cancelTrade",
+            reaction: cancelTrade,
             args: [data],
         },
-    ]);
+    ]).addToMessage(msg);
 
     return Result.ok(void 0);
 }

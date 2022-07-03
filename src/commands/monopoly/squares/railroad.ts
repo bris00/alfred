@@ -2,6 +2,7 @@ import { embed, EMPTY_FIELD, EMPTY_INLINE_FIELD, transaction } from "@/alfred";
 import { MonopolyPlayer, MonopolyRailroad } from "@/database/monopoly";
 import { groupOf, RemoveMethods } from "@/dataclass";
 import { Option } from "@/option";
+import { ReactionInstanceList } from "@/reactions";
 import { Result } from "@/result";
 import { EmbedField } from "discord.js";
 import { Context } from "..";
@@ -11,6 +12,7 @@ import { Mortagable } from "../interfaces/mortage";
 import { Purchasable } from "../interfaces/purchasable";
 import { Square } from "../interfaces/square";
 import { Tradable, TradableArgs, TradableKey } from "../interfaces/trade";
+import { buy, mortage } from "../reactions";
 
 export class Railroad implements Square, Mortagable, Purchasable, Tradable {
     key!: TradableKey;
@@ -63,32 +65,30 @@ export class Railroad implements Square, Mortagable, Purchasable, Tradable {
     }
 
     async doMortage(player: MonopolyPlayer): Promise<string> {
-        const result = await transaction<string, string>(
-            async (transaction) => {
-                const railroad = await MonopolyRailroad.findOne({
-                    transaction,
-                    where: {
-                        gameId: player.gameId,
-                        channelId: player.channelId,
-                        railroadName: this.name,
-                    },
-                });
+        const result = await transaction<string>(async (transaction) => {
+            const railroad = await MonopolyRailroad.findOne({
+                transaction,
+                where: {
+                    gameId: player.gameId,
+                    channelId: player.channelId,
+                    railroadName: this.name,
+                },
+            });
 
-                if (!railroad) {
-                    throw `you must own ${this.name} to mortage it`;
-                }
-
-                railroad.mortaged = true;
-                player.balance += this.mortage;
-
-                railroad.save({ transaction });
-                player.save({ transaction });
-
-                return "mortaged " + this.name;
+            if (!railroad) {
+                throw `you must own ${this.name} to mortage it`;
             }
-        );
 
-        return Result.collapse(result);
+            railroad.mortaged = true;
+            player.balance += this.mortage;
+
+            await railroad.save({ transaction });
+            await player.save({ transaction });
+
+            return "mortaged " + this.name;
+        });
+
+        return Result.collapse(result.mapErr((x) => x.toString()));
     }
 
     async display({ game, channel }: Context): Promise<DisplayResult> {
@@ -108,7 +108,7 @@ export class Railroad implements Square, Mortagable, Purchasable, Tradable {
 
         return {
             embed: embed()
-                .setColor("0xEEEEEE")
+                .setColor(0xeeeeee)
                 .addFields(
                     { name: "Railroad", value: this.name, inline: true },
                     {
@@ -154,16 +154,16 @@ export class Railroad implements Square, Mortagable, Purchasable, Tradable {
                     },
                     EMPTY_INLINE_FIELD
                 ),
-            reactions: [
+            reactions: ReactionInstanceList.create([
                 {
-                    reaction: "buy",
+                    reaction: buy,
                     args: [this.square],
                 },
                 {
-                    reaction: "mortage",
+                    reaction: mortage,
                     args: [this.square],
                 },
-            ],
+            ]),
         };
     }
 
@@ -199,9 +199,8 @@ export class Railroad implements Square, Mortagable, Purchasable, Tradable {
                 throw new Error("Bad number of owned railroads");
             }
 
-            const sum = this.rent[
-                num_owned as keyof typeof Railroad.prototype.rent
-            ];
+            const sum =
+                this.rent[num_owned as keyof typeof Railroad.prototype.rent];
 
             const owner = await MonopolyPlayer.findOne({
                 transaction,
@@ -248,38 +247,36 @@ export class Railroad implements Square, Mortagable, Purchasable, Tradable {
     }
 
     async buy(player: MonopolyPlayer) {
-        const result = await transaction<string, string>(
-            async (transaction) => {
-                const [rr, built] = await MonopolyRailroad.findOrBuild({
-                    transaction,
-                    where: {
-                        gameId: player.gameId,
-                        channelId: player.channelId,
-                        railroadName: this.name,
-                    },
-                });
+        const result = await transaction<string>(async (transaction) => {
+            const [rr, built] = await MonopolyRailroad.findOrBuild({
+                transaction,
+                where: {
+                    gameId: player.gameId,
+                    channelId: player.channelId,
+                    railroadName: this.name,
+                },
+            });
 
-                if (!built) {
-                    throw "someone already ownes " + this.name;
-                }
-
-                if (player.balance < this.price) {
-                    throw "cannot afford " + this.name;
-                }
-
-                player.balance -= this.price;
-                rr.userId = player.userId;
-
-                await Promise.all([
-                    player.save({ transaction }),
-                    rr.save({ transaction }),
-                ]);
-
-                return "bought " + this.name;
+            if (!built) {
+                throw "someone already owns " + this.name;
             }
-        );
 
-        return Result.collapse(result);
+            if (player.balance < this.price) {
+                throw "cannot afford " + this.name;
+            }
+
+            player.balance -= this.price;
+            rr.userId = player.userId;
+
+            await Promise.all([
+                player.save({ transaction }),
+                rr.save({ transaction }),
+            ]);
+
+            return "bought " + this.name;
+        });
+
+        return Result.collapse(result.mapErr((x) => x.toString()));
     }
 }
 

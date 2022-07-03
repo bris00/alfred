@@ -1,15 +1,29 @@
 import { MonopolyGame, MonopolyPlayer } from "@/database/monopoly";
 import { Option } from "@/option";
 import { Result } from "@/result";
-import { DMChannel, GuildMember, NewsChannel, TextChannel } from "discord.js";
+import {
+    DMChannel,
+    GuildMember,
+    NewsChannel,
+    PartialDMChannel,
+    TextChannel,
+    ThreadChannel,
+    VoiceChannel,
+} from "discord.js";
 import { Context } from "..";
 
 export function dollar(amount: number): string {
-    return "$" + amount;
+    return `$${amount}`;
 }
 
 export async function findMember(
-    channel: TextChannel | NewsChannel | DMChannel,
+    channel:
+        | TextChannel
+        | NewsChannel
+        | DMChannel
+        | PartialDMChannel
+        | ThreadChannel
+        | VoiceChannel,
     userId: string
 ): Promise<Option<GuildMember>> {
     const member = await channel.lastMessage?.guild?.members.fetch(userId);
@@ -23,7 +37,13 @@ export async function findMember(
 
 export async function getPlayer(
     userId: string,
-    channel: TextChannel | NewsChannel | DMChannel
+    channel:
+        | TextChannel
+        | NewsChannel
+        | DMChannel
+        | PartialDMChannel
+        | ThreadChannel
+        | VoiceChannel
 ): Promise<Result<MonopolyPlayer, string>> {
     if (!(await meetsPlayerConditions(userId))) {
         return Result.err("Not eligible to play");
@@ -56,7 +76,13 @@ export async function getPlayer(
 
 export async function getContext(
     userId: string,
-    channel: TextChannel | NewsChannel | DMChannel
+    channel:
+        | TextChannel
+        | NewsChannel
+        | DMChannel
+        | PartialDMChannel
+        | ThreadChannel
+        | VoiceChannel
 ): Promise<Result<Context, string>> {
     if (!(await meetsPlayerConditions(userId))) {
         return Result.err("Not eligible to play");
@@ -106,12 +132,12 @@ export async function findChannelCurrentGame(
     return Option.fromNullable(game);
 }
 
-export async function meetsPlayerConditions(_userId: string): Promise<boolean> {
-    return true;
+export function meetsPlayerConditions(_userId: string): Promise<boolean> {
+    return Promise.resolve(true);
 }
 
-export async function isBank(_userId: string): Promise<boolean> {
-    return true;
+export function isBank(_userId: string): Promise<boolean> {
+    return Promise.resolve(true);
 }
 
 export function choose<T>(choices: T[]): T {

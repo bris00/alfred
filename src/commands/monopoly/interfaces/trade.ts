@@ -1,5 +1,5 @@
 import { MonopolyPlayer } from "@/database/monopoly";
-import { Transaction } from "sequelize/types";
+import { Transaction } from "sequelize";
 
 export enum TradableKey {
     RED_CARD = 1,
@@ -51,5 +51,5 @@ export interface Tradable {
     readonly itemTerms: string[];
     readonly displayName: string;
 
-    give({}: TradableArgs): Promise<void>;
+    give(args: TradableArgs): Promise<void>;
 }

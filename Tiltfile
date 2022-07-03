@@ -4,8 +4,12 @@ docker_compose(encode_yaml({
             'image': 'localhost/alfred-svc',
             'entrypoint': 'npm start',
             'env_file': 'test.local.env',
-        }
-    }
+            'environment': {
+                'ENABLE_MONOPOLY': 'true',
+                'ENABLE_CASINO': 'true',
+            },
+        },
+    },
 }))
 
 docker_build('localhost/alfred-svc', '.',

@@ -13,6 +13,17 @@ module.exports = {
         "plugin:import/warnings",
         "plugin:prettier/recommended",
     ],
+    settings: {
+        "import/parsers": {
+            "@typescript-eslint/parser": [".ts", ".tsx"],
+        },
+        "import/resolver": {
+            typescript: {
+                alwaysTryTypes: true,
+                project: "<root>",
+            },
+        },
+    },
     env: {
         es2020: true,
     },
@@ -45,6 +56,10 @@ module.exports = {
             ],
             rules: {
                 "@typescript-eslint/require-await": "error",
+                "@typescript-eslint/no-unused-vars": [
+                    "error",
+                    { argsIgnorePattern: "^_" },
+                ],
             },
         },
         {

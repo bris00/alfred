@@ -2,6 +2,7 @@ import { embed, EMPTY_FIELD, EMPTY_INLINE_FIELD, transaction } from "@/alfred";
 import { MonopolyDeed, MonopolyPlayer } from "@/database/monopoly";
 import { groupOf, RemoveMethods } from "@/dataclass";
 import { Option } from "@/option";
+import { ReactionInstanceList } from "@/reactions";
 import { Result } from "@/result";
 import { EmbedField } from "discord.js";
 import { Context } from "..";
@@ -11,16 +12,17 @@ import { Mortagable } from "../interfaces/mortage";
 import { Purchasable } from "../interfaces/purchasable";
 import { Square } from "../interfaces/square";
 import { Tradable, TradableArgs, TradableKey } from "../interfaces/trade";
+import { buy, buyHotel, buyHouse, mortage } from "../reactions";
 
 enum COLOR {
-    BROWN = "0xB35100",
-    LIGHT_BLUE = "0x0C9999",
-    RED = "0xB30000",
-    ORANGE = "0xFF7F15",
-    GREEN = "0x008F00",
-    YELLOW = "0xFFB115",
-    PINK = "0xCD117B",
-    BLUE = "0x082A78",
+    BROWN = 0xb35100,
+    LIGHT_BLUE = 0x0c9999,
+    RED = 0xb30000,
+    ORANGE = 0xff7f15,
+    GREEN = 0x008f00,
+    YELLOW = 0xffb115,
+    PINK = 0xcd117b,
+    BLUE = 0x082a78,
 }
 
 const COLOR_NAME: { [key in COLOR]: string } = {
@@ -95,62 +97,60 @@ export class Deed implements Square, Mortagable, Purchasable, Tradable {
     }
 
     async doMortage(player: MonopolyPlayer): Promise<string> {
-        const result = await transaction<string, string>(
-            async (transaction) => {
-                const deed = await MonopolyDeed.findOne({
-                    transaction,
-                    where: {
-                        gameId: player.gameId,
-                        channelId: player.channelId,
-                        deedName: this.name,
-                    },
-                });
+        const result = await transaction<string>(async (transaction) => {
+            const deed = await MonopolyDeed.findOne({
+                transaction,
+                where: {
+                    gameId: player.gameId,
+                    channelId: player.channelId,
+                    deedName: this.name,
+                },
+            });
 
-                if (!deed) {
-                    throw `you must own ${this.name} to mortage it`;
-                }
-
-                const deeds = await Promise.all(
-                    COLORS[this.color]
-                        .map((k) => DEEDS[k])
-                        .map((d) =>
-                            MonopolyDeed.findOne({
-                                transaction,
-                                where: {
-                                    gameId: player.gameId,
-                                    channelId: player.channelId,
-                                    deedName: d.name,
-                                },
-                            })
-                        )
-                );
-
-                if (
-                    !deeds.every(
-                        (d) =>
-                            !d ||
-                            d.userId !== player.userId ||
-                            (!d.hotel && d.houses === 0)
-                    )
-                ) {
-                    throw `all deeds on monopoly ${
-                        COLOR_NAME[this.color]
-                    } must be unimproved to mortage ${this.name}`;
-                }
-
-                deed.mortaged = true;
-                player.balance += this.mortage;
-
-                await Promise.all([
-                    deed.save({ transaction }),
-                    player.save({ transaction }),
-                ]);
-
-                return "mortaged " + this.name;
+            if (!deed) {
+                throw `you must own ${this.name} to mortage it`;
             }
-        );
 
-        return Result.collapse(result);
+            const deeds = await Promise.all(
+                COLORS[this.color]
+                    .map((k) => DEEDS[k])
+                    .map((d) =>
+                        MonopolyDeed.findOne({
+                            transaction,
+                            where: {
+                                gameId: player.gameId,
+                                channelId: player.channelId,
+                                deedName: d.name,
+                            },
+                        })
+                    )
+            );
+
+            if (
+                !deeds.every(
+                    (d) =>
+                        !d ||
+                        d.userId !== player.userId ||
+                        (!d.hotel && d.houses === 0)
+                )
+            ) {
+                throw `all deeds on monopoly ${
+                    COLOR_NAME[this.color]
+                } must be unimproved to mortage ${this.name}`;
+            }
+
+            deed.mortaged = true;
+            player.balance += this.mortage;
+
+            await Promise.all([
+                deed.save({ transaction }),
+                player.save({ transaction }),
+            ]);
+
+            return "mortaged " + this.name;
+        });
+
+        return Result.collapse(result.mapErr((x) => x.toString()));
     }
 
     async display({ game, channel }: Context): Promise<DisplayResult> {
@@ -181,7 +181,11 @@ export class Deed implements Square, Mortagable, Purchasable, Tradable {
                             .unwrapOr("--------"),
                     },
                     EMPTY_INLINE_FIELD,
-                    { name: "Houses", value: deed?.houses || 0, inline: true },
+                    {
+                        name: "Houses",
+                        value: (deed?.houses || 0).toString(),
+                        inline: true,
+                    },
                     {
                         name: "Hotel",
                         value: deed?.hotel ? "yes" : "no",
@@ -234,24 +238,24 @@ export class Deed implements Square, Mortagable, Purchasable, Tradable {
                     },
                     EMPTY_INLINE_FIELD
                 ),
-            reactions: [
+            reactions: ReactionInstanceList.create([
                 {
-                    reaction: "buy",
+                    reaction: buy,
                     args: [this.square],
                 },
                 {
-                    reaction: "buyHouse",
+                    reaction: buyHouse,
                     args: [this.square],
                 },
                 {
-                    reaction: "buyHotel",
+                    reaction: buyHotel,
                     args: [this.square],
                 },
                 {
-                    reaction: "mortage",
+                    reaction: mortage,
                     args: [this.square],
                 },
-            ],
+            ]),
         };
     }
 
@@ -335,175 +339,169 @@ export class Deed implements Square, Mortagable, Purchasable, Tradable {
     }
 
     async buyHouse(player: MonopolyPlayer) {
-        const result = await transaction<string, string>(
-            async (transaction) => {
-                if (player.balance < this.cost.house) {
-                    throw "cannot afford a house on " + this.name;
-                }
-
-                const deed = await MonopolyDeed.findOne({
-                    transaction,
-                    where: {
-                        gameId: player.gameId,
-                        channelId: player.channelId,
-                        deedName: this.name,
-                    },
-                });
-
-                if (!deed || deed.userId !== player.userId) {
-                    throw "you do not own " + this.name;
-                }
-
-                if (deed.houses >= 4) {
-                    throw "you already own 4 houses on " + this.name;
-                }
-
-                const fullSet = await Promise.all(
-                    COLORS[this.color].map((name) =>
-                        MonopolyDeed.findOne({
-                            transaction,
-                            where: {
-                                gameId: player.gameId,
-                                channelId: player.channelId,
-                                deedName: name,
-                            },
-                        })
-                    )
-                );
-
-                if (!fullSet.every((d) => d && d.userId === player.userId)) {
-                    throw (
-                        "you do not own all deeds in monopoly " +
-                        COLOR_NAME[this.color]
-                    );
-                }
-
-                if (!fullSet.every((d) => d && d.houses >= deed.houses)) {
-                    throw (
-                        "must build houses evenly in monopoly " +
-                        COLOR_NAME[this.color]
-                    );
-                }
-
-                player.balance -= this.cost.house;
-                deed.houses += 1;
-
-                await Promise.all([
-                    player.save({ transaction }),
-                    deed.save({ transaction }),
-                ]);
-
-                return "bought house on " + this.name;
+        const result = await transaction<string>(async (transaction) => {
+            if (player.balance < this.cost.house) {
+                throw "cannot afford a house on " + this.name;
             }
-        );
 
-        return Result.collapse(result);
+            const deed = await MonopolyDeed.findOne({
+                transaction,
+                where: {
+                    gameId: player.gameId,
+                    channelId: player.channelId,
+                    deedName: this.name,
+                },
+            });
+
+            if (!deed || deed.userId !== player.userId) {
+                throw "you do not own " + this.name;
+            }
+
+            if (deed.houses >= 4) {
+                throw "you already own 4 houses on " + this.name;
+            }
+
+            const fullSet = await Promise.all(
+                COLORS[this.color].map((name) =>
+                    MonopolyDeed.findOne({
+                        transaction,
+                        where: {
+                            gameId: player.gameId,
+                            channelId: player.channelId,
+                            deedName: name,
+                        },
+                    })
+                )
+            );
+
+            if (!fullSet.every((d) => d && d.userId === player.userId)) {
+                throw (
+                    "you do not own all deeds in monopoly " +
+                    COLOR_NAME[this.color]
+                );
+            }
+
+            if (!fullSet.every((d) => d && d.houses >= deed.houses)) {
+                throw (
+                    "must build houses evenly in monopoly " +
+                    COLOR_NAME[this.color]
+                );
+            }
+
+            player.balance -= this.cost.house;
+            deed.houses += 1;
+
+            await Promise.all([
+                player.save({ transaction }),
+                deed.save({ transaction }),
+            ]);
+
+            return "bought house on " + this.name;
+        });
+
+        return Result.collapse(result.mapErr((x) => x.toString()));
     }
 
     async buyHotel(player: MonopolyPlayer) {
-        const result = await transaction<string, string>(
-            async (transaction) => {
-                if (player.balance < this.cost.hotel) {
-                    throw "cannot afford a hotel on " + this.name;
-                }
-
-                const deed = await MonopolyDeed.findOne({
-                    transaction,
-                    where: {
-                        gameId: player.gameId,
-                        channelId: player.channelId,
-                        deedName: this.name,
-                    },
-                });
-
-                if (!deed || deed.userId !== player.userId) {
-                    throw "you do not own " + this.name;
-                }
-
-                if (deed.hotel) {
-                    throw "you already own a hotel on " + this.name;
-                }
-
-                const fullSet = await Promise.all(
-                    COLORS[this.color].map((name) =>
-                        MonopolyDeed.findOne({
-                            transaction,
-                            where: {
-                                gameId: player.gameId,
-                                channelId: player.channelId,
-                                deedName: name,
-                            },
-                        })
-                    )
-                );
-
-                if (!fullSet.every((d) => d && d.userId === player.userId)) {
-                    throw (
-                        "you do not own all deeds in monopoly " +
-                        COLOR_NAME[this.color]
-                    );
-                }
-
-                if (!fullSet.every((d) => d && (d.houses >= 4 || d.hotel))) {
-                    throw (
-                        "you do not own 4 houses or a hotel on all deeds in monopoly " +
-                        COLOR_NAME[this.color]
-                    );
-                }
-
-                player.balance -= this.cost.hotel;
-                deed.houses = 0;
-                deed.hotel = true;
-
-                await Promise.all([
-                    player.save({ transaction }),
-                    deed.save({ transaction }),
-                ]);
-
-                return "bought hotel on " + this.name;
+        const result = await transaction<string>(async (transaction) => {
+            if (player.balance < this.cost.hotel) {
+                throw "cannot afford a hotel on " + this.name;
             }
-        );
 
-        return Result.collapse(result);
+            const deed = await MonopolyDeed.findOne({
+                transaction,
+                where: {
+                    gameId: player.gameId,
+                    channelId: player.channelId,
+                    deedName: this.name,
+                },
+            });
+
+            if (!deed || deed.userId !== player.userId) {
+                throw "you do not own " + this.name;
+            }
+
+            if (deed.hotel) {
+                throw "you already own a hotel on " + this.name;
+            }
+
+            const fullSet = await Promise.all(
+                COLORS[this.color].map((name) =>
+                    MonopolyDeed.findOne({
+                        transaction,
+                        where: {
+                            gameId: player.gameId,
+                            channelId: player.channelId,
+                            deedName: name,
+                        },
+                    })
+                )
+            );
+
+            if (!fullSet.every((d) => d && d.userId === player.userId)) {
+                throw (
+                    "you do not own all deeds in monopoly " +
+                    COLOR_NAME[this.color]
+                );
+            }
+
+            if (!fullSet.every((d) => d && (d.houses >= 4 || d.hotel))) {
+                throw (
+                    "you do not own 4 houses or a hotel on all deeds in monopoly " +
+                    COLOR_NAME[this.color]
+                );
+            }
+
+            player.balance -= this.cost.hotel;
+            deed.houses = 0;
+            deed.hotel = true;
+
+            await Promise.all([
+                player.save({ transaction }),
+                deed.save({ transaction }),
+            ]);
+
+            return "bought hotel on " + this.name;
+        });
+
+        return Result.collapse(result.mapErr((x) => x.toString()));
     }
 
     async buy(player: MonopolyPlayer) {
-        const result = await transaction<string, string>(
-            async (transaction) => {
-                if (player.currentSquare !== this.square) {
-                    throw "you can only buy deeds you are standing on";
-                }
-
-                if (player.balance < this.cost.deed) {
-                    throw "cannot afford " + this.name;
-                }
-
-                const [deed, built] = await MonopolyDeed.findOrBuild({
-                    transaction,
-                    where: {
-                        gameId: player.gameId,
-                        channelId: player.channelId,
-                        deedName: this.name,
-                    },
-                });
-
-                if (!built) {
-                    throw "someone already ownes " + this.name;
-                }
-
-                player.balance -= this.cost.deed;
-                deed.userId = player.userId;
-
-                await Promise.all([
-                    player.save({ transaction }),
-                    deed.save({ transaction }),
-                ]);
-
-                return "bought " + this.name;
+        const result = await transaction<string>(async (transaction) => {
+            if (player.currentSquare !== this.square) {
+                throw "you can only buy deeds you are standing on";
             }
-        );
 
-        return Result.collapse(result);
+            if (player.balance < this.cost.deed) {
+                throw "cannot afford " + this.name;
+            }
+
+            const [deed, built] = await MonopolyDeed.findOrBuild({
+                transaction,
+                where: {
+                    gameId: player.gameId,
+                    channelId: player.channelId,
+                    deedName: this.name,
+                },
+            });
+
+            if (!built) {
+                throw "someone already ownes " + this.name;
+            }
+
+            player.balance -= this.cost.deed;
+            deed.userId = player.userId;
+
+            await Promise.all([
+                player.save({ transaction }),
+                deed.save({ transaction }),
+            ]);
+
+            return "bought " + this.name;
+        });
+
+        return Result.collapse(result.mapErr((x) => x.toString()));
     }
 }
 
