@@ -15,7 +15,7 @@ export class MonopolyGame extends Model {
         },
         gameId: {
             field: "game_id",
-            type: DataTypes.NUMBER,
+            type: DataTypes.DOUBLE,
             primaryKey: true,
         },
         started: {
@@ -60,22 +60,22 @@ export class MonopolyPlayer extends Model {
         },
         gameId: {
             field: "game_id",
-            type: DataTypes.NUMBER,
+            type: DataTypes.DOUBLE,
             primaryKey: true,
         },
         balance: {
             field: "balance",
-            type: DataTypes.NUMBER,
+            type: DataTypes.DOUBLE,
             defaultValue: 0,
         },
         jailed: {
             field: "jailed",
-            type: DataTypes.NUMBER,
+            type: DataTypes.DOUBLE,
             defaultValue: 0,
         },
         doubleStreak: {
             field: "double_streak",
-            type: DataTypes.NUMBER,
+            type: DataTypes.DOUBLE,
             defaultValue: 0,
         },
         nextTurn: {
@@ -126,7 +126,7 @@ export class MonopolyInventory extends Model {
         },
         amount: {
             field: "amount",
-            type: DataTypes.NUMBER,
+            type: DataTypes.DOUBLE,
             defaultValue: 0,
         },
     };
@@ -164,7 +164,7 @@ export class MonopolyDeed extends Model {
         },
         houses: {
             field: "houses",
-            type: DataTypes.NUMBER,
+            type: DataTypes.DOUBLE,
             defaultValue: 0,
         },
         hotel: {

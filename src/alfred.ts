@@ -31,13 +31,9 @@ export function downcastTo<T, R>(cls: Constructor<R>): (x: T) => Option<R> {
     };
 }
 
-const SEQUALIZE = new Sequelize("database", "user", "password", {
-    host: "localhost",
-    dialect: "sqlite",
-    logging: false,
-    // SQLite only
-    storage: "database.sqlite",
-});
+const SEQUALIZE = new Sequelize(
+    Result.fromUndef(process.env.DATABASE_CONNECTION_URI).unwrap()
+);
 
 export async function transaction<T>(
     fn: (t: Transaction) => PromiseLike<T>

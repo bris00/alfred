@@ -18,6 +18,14 @@ export class Result<T, E> {
         });
     }
 
+    static fromUndef<T>(value: T | undefined): Result<T, undefined> {
+        if (value == undefined) {
+            return Result.err(undefined);
+        } else {
+            return Result.ok(value);
+        }
+    }
+
     static ok<T, E>(ok: T): Result<T, E> {
         return new Result<T, E>({
             tag: OK,

@@ -22,8 +22,8 @@
     "discord.js": "^13.8.1",
     "fuzzysort": "^2.0.1",
     "nodemon": "^2.0.18",
+    "pg": "^8.7.3",
     "sequelize": "^6.21.1",
-    "sqlite3": "^5.0.8",
     "sugar": "^2.0.6"
   },
   "devDependencies": {
@@ -47,6 +47,7 @@
     "jest": "^28.1.1",
     "prettier": "^2.7.1",
     "rimraf": "^3.0.2",
+    "sqlite3": "^5.0.8",
     "tsup": "^6.1.2",
     "typescript": "^4.7.4"
   },

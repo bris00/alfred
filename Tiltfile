@@ -5,6 +5,7 @@ docker_compose(encode_yaml({
             'entrypoint': 'npm start',
             'env_file': 'test.local.env',
             'environment': {
+                'DATABASE_CONNECTION_URI': 'sqlite::memory:',
                 'ENABLE_MONOPOLY': 'true',
                 'ENABLE_CASINO': 'true',
             },
