@@ -1,13 +1,4 @@
-import {
-    DMChannel,
-    Message,
-    NewsChannel,
-    PartialDMChannel,
-    TextChannel,
-    ThreadChannel,
-    VoiceChannel,
-} from "discord.js";
-import { Sequelize } from "sequelize";
+import { defineCommand, command } from "@/commands";
 
 import {
     MonopolyPlayer,
@@ -17,7 +8,6 @@ import {
     MonopolyRailroad,
 } from "@/database/monopoly";
 import { Option } from "@/option";
-import { embed } from "@/alfred";
 import { roll } from "./actions/roll";
 import {
     findChannelCurrentGame,
@@ -27,19 +17,16 @@ import {
 } from "./actions/common";
 import { trade } from "./actions/trade";
 import { search } from "./actions/search";
-
-type MCommand = (msg: Message, args: string[]) => Promise<void>;
+import { Guild } from "discord.js";
+import {
+    SlashCommandStringOption,
+    SlashCommandUserOption,
+} from "@discordjs/builders";
 
 export type Context = {
     player: MonopolyPlayer;
     game: MonopolyGame;
-    channel:
-        | TextChannel
-        | NewsChannel
-        | DMChannel
-        | PartialDMChannel
-        | ThreadChannel
-        | VoiceChannel;
+    guild: Guild;
 };
 
 export const MAX_SQUARES = 40;
@@ -48,46 +35,311 @@ export const DICE = [1, 2, 3, 4, 5, 6];
 
 const STARTING_BALANCE = 1500;
 
-export async function init(sequelize: Sequelize) {
-    MonopolyPlayer.init(MonopolyPlayer.FIELDS, {
-        sequelize,
-        modelName: "monopoly_player",
-    });
+export const init = defineCommand({
+    models: [
+        MonopolyPlayer,
+        MonopolyGame,
+        MonopolyInventory,
+        MonopolyDeed,
+        MonopolyRailroad,
+    ],
+    name: "monopoly",
+    description: "Play a game of monopoly!",
+    commands: {
+        roll: command({
+            description: "Roll the monopoly dice",
+            async handler(interaction) {
+                const game = await findChannelCurrentGame(
+                    interaction.channelId
+                );
 
-    MonopolyGame.init(MonopolyGame.FIELDS, {
-        sequelize,
-        modelName: "monopoly_game",
-    });
+                if (game.isNone()) {
+                    await interaction.reply("No active game in channel");
+                    return;
+                }
 
-    MonopolyInventory.init(MonopolyInventory.FIELDS, {
-        sequelize,
-        modelName: "monopoly_inventory",
-    });
+                const result = await roll(
+                    interaction,
+                    game().channelId,
+                    game().gameId
+                );
 
-    MonopolyDeed.init(MonopolyDeed.FIELDS, {
-        sequelize,
-        modelName: "monopoly_deed",
-    });
+                if (result.isErr()) {
+                    await interaction.reply(result.unwrapErr());
+                }
+            },
+        }),
+        game: command({
+            description: "Display information about the current game",
+            async handler(interaction) {
+                const game = await findChannelCurrentGame(
+                    interaction.channelId
+                );
 
-    MonopolyRailroad.init(MonopolyRailroad.FIELDS, {
-        sequelize,
-        modelName: "monopoly_railroad",
-    });
+                if (game.isNone()) {
+                    await interaction.reply("No game in channel");
+                    return;
+                }
 
-    await Promise.all([
-        MonopolyGame.sync(),
-        MonopolyPlayer.sync(),
-        MonopolyInventory.sync(),
-        MonopolyDeed.sync(),
-        MonopolyRailroad.sync(),
-    ]);
+                //TODO
 
-    const COMMANDS: Record<string, MCommand | undefined> = {
-        async help(msg) {
-            await msg.channel.send({
-                embeds: [
-                    embed().setDescription(
-                        "\
+                await interaction.reply("TODO");
+            },
+        }),
+        show: command({
+            description: "Show information about player status or square",
+            options: [
+                new SlashCommandStringOption()
+                    .setDescription("The term to search for")
+                    .setRequired(true)
+                    .setName("term"),
+            ],
+            async handler(interaction) {
+                const game = await findChannelCurrentGame(
+                    interaction.channelId
+                );
+
+                if (game.isNone()) {
+                    await interaction.reply("No active game in channel");
+                    return;
+                }
+
+                const ctx = await getContext(
+                    interaction,
+                    game().channelId,
+                    game().gameId
+                );
+
+                if (ctx.isErr()) {
+                    await interaction.reply(ctx.unwrapErr());
+                }
+
+                const terms = interaction.options.getString("term", true);
+
+                const displayable = await search(ctx.unwrap(), terms);
+
+                if (displayable.isNone()) {
+                    await interaction.reply(`Could not find "${terms}"`);
+                    return;
+                }
+
+                const { embed, reactions } = await displayable
+                    .unwrap()
+                    .display(ctx.unwrap());
+
+                const { components } = await reactions.createComponents();
+
+                await interaction.reply({
+                    embeds: [embed],
+                    components,
+                });
+            },
+        }),
+        new: command({
+            description: "Create a game",
+            async handler(interaction) {
+                if (!(await isBank(interaction.user.id))) {
+                    await interaction.reply(
+                        "You do not have permission to create new games"
+                    );
+                    return;
+                }
+
+                const game = await findChannelCurrentGame(
+                    interaction.channelId
+                );
+
+                if (!game.isNone() && !game().ended) {
+                    await interaction.reply(
+                        "There is an ongoing game in this channel"
+                    );
+                    return;
+                }
+
+                const nextGameId = game
+                    .map((game) => game.gameId + 1)
+                    .unwrapOr(0);
+
+                await MonopolyGame.create({
+                    channelId: interaction.channelId,
+                    gameId: nextGameId,
+                    active: true,
+                });
+
+                await interaction.reply("Done");
+            },
+        }),
+        start: command({
+            description: "Start the new game",
+            async handler(interaction) {
+                if (!(await isBank(interaction.user.id))) {
+                    await interaction.reply(
+                        "You do not have permission to create new games"
+                    );
+                    return;
+                }
+
+                const game = await findChannelCurrentGame(
+                    interaction.channelId
+                );
+
+                if (game.isNone()) {
+                    await interaction.reply("No game in channel");
+                    return;
+                }
+
+                if (!game.isNone() && game().ended) {
+                    await interaction.reply("Cannot find new game");
+                    return;
+                }
+
+                if (!game.isNone() && game().started) {
+                    await interaction.reply("Game already started");
+                    return;
+                }
+
+                await Option.promise(
+                    game.map((game) => {
+                        game.started = true;
+                        return game.save();
+                    })
+                );
+
+                await interaction.reply("Done");
+            },
+        }),
+        end: command({
+            description: "End the current game",
+            async handler(interaction) {
+                if (!(await isBank(interaction.user.id))) {
+                    await interaction.reply(
+                        "You do not have permission to end games"
+                    );
+                    return;
+                }
+
+                const game = await findChannelCurrentGame(
+                    interaction.channelId
+                );
+
+                if (game.isNone()) {
+                    await interaction.reply("No game in channel");
+                    return;
+                }
+
+                if (!game.isNone() && (game().ended || !game().started)) {
+                    await interaction.reply("No active game");
+                    return;
+                }
+
+                await Option.promise(
+                    game.map((game) => {
+                        game.ended = true;
+                        return game.save();
+                    })
+                );
+
+                await interaction.reply("Done");
+            },
+        }),
+        register: command({
+            description: "Register to play in the current game",
+            async handler(interaction) {
+                if (!(await meetsPlayerConditions(interaction.user.id))) {
+                    await interaction.reply("Not eligible to play");
+                    return;
+                }
+
+                const game = await findChannelCurrentGame(
+                    interaction.channelId
+                );
+
+                if (game.isNone()) {
+                    await interaction.reply("No game in channel");
+                    return;
+                }
+
+                if (game().started) {
+                    await interaction.reply("Has already started");
+                    return;
+                }
+
+                if (game().ended) {
+                    await interaction.reply("Game over");
+                    return;
+                }
+
+                const [player, built] = await MonopolyPlayer.findOrBuild({
+                    where: {
+                        userId: interaction.user.id,
+                        channelId: interaction.channelId,
+                        gameId: game().gameId,
+                    },
+                });
+
+                if (!built) {
+                    await interaction.reply("Already registered to play");
+                    return;
+                }
+
+                player.balance = STARTING_BALANCE;
+                await player.save();
+                await interaction.reply("Done");
+            },
+        }),
+        trade: command({
+            description: "Trade stuff",
+            options: [
+                new SlashCommandUserOption()
+                    .setDescription("The trading partner")
+                    .setRequired(true)
+                    .setName("partner"),
+                new SlashCommandStringOption()
+                    .setDescription("The tradable(s) in question")
+                    .setRequired(true)
+                    .setName("tradable"),
+            ],
+            async handler(interaction) {
+                const partner = interaction.options.getUser("partner");
+
+                if (!partner) {
+                    await interaction.reply(
+                        "You need to specify who to trade with"
+                    );
+                    return;
+                }
+
+                const game = await findChannelCurrentGame(
+                    interaction.channelId
+                );
+
+                if (game.isNone()) {
+                    await interaction.reply("No game in channel");
+                    return;
+                }
+
+                const result = await trade(
+                    interaction,
+                    game().channelId,
+                    game().gameId,
+                    partner,
+                    interaction.options.getString("tradable", true)
+                );
+
+                if (result.isErr()) {
+                    await interaction.reply(result.unwrapErr());
+                }
+            },
+        }),
+        games: command({
+            description: "List last games",
+            async handler(interaction) {
+                //TODO
+                await interaction.reply("Not implemented yet!");
+            },
+        }),
+    },
+    help: "\
 A game of monopoly. You may roll once every 12 hours.\n\
 \n\
 ```\n\
@@ -102,218 +354,5 @@ A game of monopoly. You may roll once every 12 hours.\n\
 !monopoly start          Start new game\n\
 !monopoly end            End current game\n\
 !monopoly help           Show this help message\n\
-```"
-                    ),
-                ],
-            });
-        },
-        async game(msg) {
-            const game = await findChannelCurrentGame(msg.channel.id);
-
-            if (game.isNone()) {
-                await msg.channel.send("No game in channel");
-                return;
-            }
-
-            //TODO
-
-            await msg.channel.send("No game in channel");
-        },
-        async games(msg) {
-            await msg.channel.send("Not implemented yet!");
-        },
-        async show(msg, terms) {
-            const ctx = await getContext(msg.author.id, msg.channel);
-
-            if (ctx.isErr()) {
-                await msg.channel.send(ctx.unwrapErr());
-            }
-
-            const displayable = await search(ctx.unwrap(), terms.join(" "));
-
-            if (displayable.isNone()) {
-                await msg.channel.send(`Could not find "${terms.join(" ")}"`);
-                return;
-            }
-
-            const { embed, reactions } = await displayable
-                .unwrap()
-                .display(ctx.unwrap());
-
-            const ans = await msg.channel.send({ embeds: [embed] });
-
-            await reactions.addToMessage(ans);
-        },
-        async new(msg) {
-            if (!(await isBank(msg.author.id))) {
-                await msg.channel.send(
-                    "You do not have permission to create new games"
-                );
-                return;
-            }
-
-            const game = await findChannelCurrentGame(msg.channel.id);
-
-            if (!game.isNone() && !game.unwrap().ended) {
-                await msg.channel.send(
-                    "There is an ongoing game in this channel"
-                );
-                return;
-            }
-
-            const nextGameId = game.map((game) => game.gameId + 1).unwrapOr(0);
-
-            await MonopolyGame.create({
-                channelId: msg.channel.id,
-                gameId: nextGameId,
-                active: true,
-            });
-
-            await msg.channel.send("Done");
-        },
-        async start(msg) {
-            if (!(await isBank(msg.author.id))) {
-                await msg.channel.send(
-                    "You do not have permission to create new games"
-                );
-                return;
-            }
-
-            const game = await findChannelCurrentGame(msg.channel.id);
-
-            if (game.isNone()) {
-                await msg.channel.send("No game in channel");
-                return;
-            }
-
-            if (!game.isNone() && game.unwrap().ended) {
-                await msg.channel.send("Cannot find new game");
-                return;
-            }
-
-            if (!game.isNone() && game.unwrap().started) {
-                await msg.channel.send("Game already started");
-                return;
-            }
-
-            await Option.promise(
-                game.map((game) => {
-                    game.started = true;
-                    return game.save();
-                })
-            );
-
-            await msg.channel.send("Done");
-        },
-        async end(msg) {
-            if (!(await isBank(msg.author.id))) {
-                await msg.channel.send(
-                    "You do not have permission to end games"
-                );
-                return;
-            }
-
-            const game = await findChannelCurrentGame(msg.channel.id);
-
-            if (game.isNone()) {
-                await msg.channel.send("No game in channel");
-                return;
-            }
-
-            if (
-                !game.isNone() &&
-                (game.unwrap().ended || !game.unwrap().started)
-            ) {
-                await msg.channel.send("No active game");
-                return;
-            }
-
-            await Option.promise(
-                game.map((game) => {
-                    game.ended = true;
-                    return game.save();
-                })
-            );
-
-            await msg.channel.send("Done");
-        },
-        async register(msg) {
-            if (!(await meetsPlayerConditions(msg.author.id))) {
-                await msg.channel.send("Not eligible to play");
-                return;
-            }
-
-            const game = await findChannelCurrentGame(msg.channel.id);
-
-            if (game.isNone()) {
-                await msg.channel.send("No game in channel");
-                return;
-            }
-
-            if (game.unwrap().started) {
-                await msg.channel.send("Has already started");
-                return;
-            }
-
-            if (game.unwrap().ended) {
-                await msg.channel.send("Game over");
-                return;
-            }
-
-            const [player, built] = await MonopolyPlayer.findOrBuild({
-                where: {
-                    userId: msg.author.id,
-                    channelId: msg.channel.id,
-                    gameId: game.unwrap().gameId,
-                },
-            });
-
-            if (!built) {
-                await msg.channel.send("Already registered to play");
-                return;
-            }
-
-            player.balance = STARTING_BALANCE;
-            await player.save();
-            await msg.channel.send("Done");
-        },
-        async trade(msg, args) {
-            const partner = args.shift();
-
-            if (!partner) {
-                await msg.channel.send("You need to specify who to trade with");
-                return;
-            }
-
-            const result = await trade(
-                msg.author,
-                msg.channel,
-                partner,
-                args.join(" ")
-            );
-
-            if (result.isErr()) {
-                await msg.channel.send(result.unwrapErr());
-            }
-        },
-        async roll(msg) {
-            const result = await roll(msg.author, msg.channel);
-
-            if (result.isErr()) {
-                await msg.channel.send(result.unwrapErr());
-            }
-        },
-    };
-
-    return async (msg: Message, args: string[]) => {
-        const command = COMMANDS[args[0]];
-
-        if (command) {
-            await command(msg, args.slice(1));
-        } else {
-            await msg.channel.send(
-                `No command "${args[0]}"\n\`!m help\` to list all commands`
-            );
-        }
-    };
-}
+```",
+});

@@ -1,15 +1,7 @@
 import { MonopolyGame, MonopolyPlayer } from "@/database/monopoly";
 import { Option } from "@/option";
 import { Result } from "@/result";
-import {
-    DMChannel,
-    GuildMember,
-    NewsChannel,
-    PartialDMChannel,
-    TextChannel,
-    ThreadChannel,
-    VoiceChannel,
-} from "discord.js";
+import { GuildMember, Interaction } from "discord.js";
 import { Context } from "..";
 
 export function dollar(amount: number): string {
@@ -17,16 +9,10 @@ export function dollar(amount: number): string {
 }
 
 export async function findMember(
-    channel:
-        | TextChannel
-        | NewsChannel
-        | DMChannel
-        | PartialDMChannel
-        | ThreadChannel
-        | VoiceChannel,
+    context: Context,
     userId: string
 ): Promise<Option<GuildMember>> {
-    const member = await channel.lastMessage?.guild?.members.fetch(userId);
+    const member = await context.guild.members.fetch(userId);
 
     if (typeof member === "undefined" || member === null) {
         return Option.none();
@@ -35,21 +21,28 @@ export async function findMember(
     }
 }
 
+export async function findGame(
+    channelId: string,
+    gameId: number
+): Promise<Option<MonopolyGame>> {
+    const game = await MonopolyGame.findOne({
+        where: { channelId, gameId },
+        order: [["gameId", "DESC"]],
+    });
+
+    return Option.fromNullable(game);
+}
+
 export async function getPlayer(
     userId: string,
-    channel:
-        | TextChannel
-        | NewsChannel
-        | DMChannel
-        | PartialDMChannel
-        | ThreadChannel
-        | VoiceChannel
+    gameChannelId: string,
+    gameId: number
 ): Promise<Result<MonopolyPlayer, string>> {
     if (!(await meetsPlayerConditions(userId))) {
         return Result.err("Not eligible to play");
     }
 
-    const game = await findChannelCurrentGame(channel.id);
+    const game = await findGame(gameChannelId, gameId);
 
     if (game.isNone()) {
         return Result.err("No active game in channel");
@@ -62,8 +55,8 @@ export async function getPlayer(
     const player = await MonopolyPlayer.findOne({
         where: {
             userId: userId,
-            channelId: game.unwrap().channelId,
-            gameId: game.unwrap().gameId,
+            channelId: gameChannelId,
+            gameId: gameId,
         },
     });
 
@@ -75,20 +68,15 @@ export async function getPlayer(
 }
 
 export async function getContext(
-    userId: string,
-    channel:
-        | TextChannel
-        | NewsChannel
-        | DMChannel
-        | PartialDMChannel
-        | ThreadChannel
-        | VoiceChannel
+    interaction: Interaction,
+    gameChannelId: string,
+    gameId: number
 ): Promise<Result<Context, string>> {
-    if (!(await meetsPlayerConditions(userId))) {
+    if (!(await meetsPlayerConditions(interaction.user.id))) {
         return Result.err("Not eligible to play");
     }
 
-    const game = await findChannelCurrentGame(channel.id);
+    const game = await findGame(gameChannelId, gameId);
 
     if (game.isNone()) {
         return Result.err("No active game in channel");
@@ -100,8 +88,8 @@ export async function getContext(
 
     const player = await MonopolyPlayer.findOne({
         where: {
-            userId: userId,
-            channelId: channel.id,
+            userId: interaction.user.id,
+            channelId: interaction.channelId,
             gameId: game.unwrap().gameId,
         },
     });
@@ -113,7 +101,7 @@ export async function getContext(
     return Result.ok({
         player,
         game: game.unwrap(),
-        channel,
+        guild: Result.fromNull(interaction.guild).unwrap(),
     });
 }
 

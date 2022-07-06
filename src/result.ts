@@ -26,6 +26,14 @@ export class Result<T, E> {
         }
     }
 
+    static fromNull<T>(value: T | null): Result<T, null> {
+        if (value == null) {
+            return Result.err(null);
+        } else {
+            return Result.ok(value);
+        }
+    }
+
     static ok<T, E>(ok: T): Result<T, E> {
         return new Result<T, E>({
             tag: OK,

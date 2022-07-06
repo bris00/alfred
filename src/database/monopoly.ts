@@ -7,6 +7,8 @@ export class MonopolyGame extends Model {
     ended!: boolean;
     chestDeck!: number[];
 
+    static MODEL_NAME = "monopoly_game";
+
     static FIELDS = {
         channelId: {
             field: "channel_id",
@@ -46,6 +48,8 @@ export class MonopolyPlayer extends Model {
     gameId!: number;
     currentSquare!: number;
     getOutOfJail!: boolean;
+
+    static MODEL_NAME = "monopoly_player";
 
     static FIELDS = {
         userId: {
@@ -103,6 +107,8 @@ export class MonopolyInventory extends Model {
     item!: string;
     amount!: number;
 
+    static MODEL_NAME = "monopoly_inventory";
+
     static FIELDS = {
         channelId: {
             field: "channel_id",
@@ -140,6 +146,8 @@ export class MonopolyDeed extends Model {
     houses!: number;
     hotel!: boolean;
     mortaged!: boolean;
+
+    static MODEL_NAME = "monopoly_deed";
 
     static FIELDS = {
         channelId: {
@@ -186,6 +194,8 @@ export class MonopolyRailroad extends Model {
     railroadName!: string;
     userId!: string | null;
     mortaged!: boolean;
+
+    static MODEL_NAME = "monopoly_railroad";
 
     static FIELDS = {
         channelId: {

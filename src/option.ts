@@ -1,54 +1,29 @@
-const NONE = Symbol();
-type None = typeof NONE;
+const SOME = Symbol();
 
-export class Option<T> {
-    private inner: T | None;
+export interface None {
+    [SOME]: false;
+}
 
-    private constructor(x: T | None) {
-        this.inner = x;
-    }
+export interface Some<T> {
+    [SOME]: true;
+    (): T;
+}
 
-    static none<T>(): Option<T> {
-        return new Option<T>(NONE);
-    }
+interface OptionMethods {
+    switch<T, R>(this: Option<T>, cases: ((x: T) => Option<R>)[]): Option<R>;
+    unwrap<T>(this: Option<T>): T;
+    isNone<T>(this: Option<T>): this is None;
+    isSome<T>(this: Option<T>): this is Some<T>;
+    forEach<T>(this: Option<T>, fn: (x: T) => void): void;
+    map<T, R>(this: Option<T>, fn: (x: T) => R): Option<R>;
+    flatMap<T, R>(this: Option<T>, fn: (x: T) => Option<R>): Option<R>;
+    unwrapOr<T>(this: Option<T>, x: T): T;
+}
 
-    static some<T>(x: T): Option<T> {
-        return new Option<T>(x);
-    }
+export type Option<T> = (Some<T> | None) & OptionMethods;
 
-    static fromMaybeUndef<T>(x: T | undefined): Option<T> {
-        if (typeof x === "undefined") {
-            return Option.none();
-        } else {
-            return Option.some(x);
-        }
-    }
-
-    static fromFalsy<T>(x: T | null | undefined): Option<T> {
-        if (!x) {
-            return Option.none();
-        } else {
-            return Option.some(x);
-        }
-    }
-
-    static fromNullable<T>(x: T | null): Option<T> {
-        if (x === null) {
-            return Option.none();
-        } else {
-            return Option.some(x);
-        }
-    }
-
-    static promise<T>(x: Option<Promise<T>>): Promise<Option<T>> {
-        if (x.inner === NONE) {
-            return Promise.resolve(Option.none());
-        } else {
-            return x.inner.then((x) => Option.some(x));
-        }
-    }
-
-    switch<R>(cases: ((x: T) => Option<R>)[]): Option<R> {
+const OptionMethods = {
+    switch<T, R>(this: Option<T>, cases: ((x: T) => Option<R>)[]): Option<R> {
         return this.flatMap((x) => {
             for (const c of cases) {
                 const r = c(x);
@@ -60,43 +35,94 @@ export class Option<T> {
 
             return Option.none();
         });
-    }
+    },
 
-    unwrap(): T {
-        if (this.inner === NONE) {
+    unwrap<T>(this: Option<T>): T {
+        if (!this[SOME]) {
             throw new Error("Option.unwrap() called on None variant");
         }
 
-        return this.inner;
-    }
+        return this();
+    },
 
-    isNone(): boolean {
-        return this.inner === NONE;
-    }
+    isNone<T>(this: Option<T>): boolean {
+        return !this[SOME];
+    },
 
-    forEach(fn: (x: T) => void): void {
-        if (this.inner !== NONE) {
-            fn(this.inner);
+    isSome<T>(this: Option<T>): boolean {
+        return this[SOME];
+    },
+
+    forEach<T>(this: Option<T>, fn: (x: T) => void): void {
+        if (this[SOME]) {
+            fn(this());
         }
-    }
+    },
 
-    map<R>(fn: (x: T) => R): Option<R> {
+    map<T, R>(this: Option<T>, fn: (x: T) => R): Option<R> {
         return this.flatMap((x) => Option.some(fn(x)));
-    }
+    },
 
-    flatMap<R>(fn: (x: T) => Option<R>): Option<R> {
-        if (this.inner !== NONE) {
-            return fn(this.inner);
+    flatMap<T, R>(this: Option<T>, fn: (x: T) => Option<R>): Option<R> {
+        if (this[SOME]) {
+            return fn(this());
         } else {
             return Option.none();
         }
-    }
+    },
 
-    unwrapOr(x: T): T {
-        if (this.inner === NONE) {
+    unwrapOr<T>(this: Option<T>, x: T): T {
+        if (!this[SOME]) {
             return x;
         } else {
-            return this.inner;
+            return this();
         }
-    }
-}
+    },
+};
+
+export const Option = {
+    none<T>(): Option<T> {
+        return { [SOME]: false, ...OptionMethods };
+    },
+
+    some<T>(x: T): Option<T> {
+        const some = (() => x) as Some<T>;
+
+        some[SOME] = true;
+        Object.assign(some, OptionMethods);
+
+        return some as Option<T>;
+    },
+
+    fromUndef<T>(x: T | undefined): Option<T> {
+        if (typeof x === "undefined") {
+            return Option.none();
+        } else {
+            return Option.some(x);
+        }
+    },
+
+    fromFalsy<T>(x: T | null | undefined): Option<T> {
+        if (!x) {
+            return Option.none();
+        } else {
+            return Option.some(x);
+        }
+    },
+
+    fromNullable<T>(x: T | null): Option<T> {
+        if (x === null) {
+            return Option.none();
+        } else {
+            return Option.some(x);
+        }
+    },
+
+    promise<T>(x: Option<Promise<T>>): Promise<Option<T>> {
+        if (!x[SOME]) {
+            return Promise.resolve(Option.none());
+        } else {
+            return x().then((x) => Option.some(x));
+        }
+    },
+};

@@ -1,19 +1,17 @@
+import { randomBytes } from "crypto";
 import {
-    MessageReaction,
-    Message,
-    User,
-    PartialUser,
-    PartialMessageReaction,
+    MessageActionRow,
+    MessageActionRowComponentResolvable,
+    MessageComponentInteraction,
 } from "discord.js";
 
 import { AlfredReaction } from "./database/alfred";
 
 export async function call(
     r: AlfredReaction,
-    user: User | PartialUser,
-    mr: MessageReaction | PartialMessageReaction
+    interaction: MessageComponentInteraction
 ) {
-    const action = REACTIONS[r.reaction.reaction].action(user, mr);
+    const action = REACTIONS[r.reaction.reaction].action(interaction);
     const { remove } = await action(...r.reaction.args);
 
     if (remove) {
@@ -27,10 +25,9 @@ type ReactionKey<Args extends unknown[]> = string & {
 };
 
 type Reaction<Args extends unknown[]> = {
-    emoji: string;
+    component: (uuid: string) => MessageActionRowComponentResolvable;
     action: (
-        _0: User | PartialUser,
-        _1: MessageReaction | PartialMessageReaction
+        interaction: MessageComponentInteraction
     ) => (...args: Args) => Promise<{ remove: boolean }>;
 };
 
@@ -51,10 +48,6 @@ export function createReaction<Args extends unknown[]>(
     REACTIONS[opts.uuid] = opts as unknown as Reaction<unknown[]>;
 
     return opts.uuid as ReactionKey<Args>;
-}
-
-export function reactionEmojis(): Set<string> {
-    return new Set(Object.values(REACTIONS).map((r) => r.emoji));
 }
 
 type A = unknown[];
@@ -94,23 +87,28 @@ export class ReactionInstanceList {
         this.reactions.push(...reactions.reactions);
     }
 
-    async addToMessage(msg: Message) {
-        await Promise.all(
-            this.reactions.map((reaction) => addReaction(msg, reaction))
+    async createComponents(): Promise<{
+        components: MessageActionRow[];
+    }> {
+        const components = await Promise.all(
+            this.reactions.map(async (reaction) => {
+                const template = REACTIONS[reaction.reaction];
+                const uuid = randomBytes(16).toString("hex");
+
+                await AlfredReaction.create({
+                    uuid,
+                    reaction,
+                });
+
+                return template.component(uuid);
+            })
         );
+
+        return {
+            components:
+                components.length > 0
+                    ? [new MessageActionRow().addComponents(components)]
+                    : [],
+        };
     }
-}
-
-export async function addReaction<Args extends unknown[]>(
-    msg: Message,
-    reaction: ReactionInstance<Args>
-) {
-    const template = REACTIONS[reaction.reaction];
-    const { emoji } = await msg.react(template.emoji);
-
-    await AlfredReaction.create({
-        messageId: msg.id,
-        emoji: emoji.name,
-        reaction,
-    });
 }

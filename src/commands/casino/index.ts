@@ -1,56 +1,37 @@
-import { embed } from "@/alfred";
+import { defineCommand, command, group } from "@/commands";
 import { Sentence } from "@/database/casino";
-
-import { Client, Message } from "discord.js";
-import { Model, ModelAttributes, ModelStatic, Sequelize } from "sequelize";
-
-type CommandOptions = {
-    help: string;
-    models: (ModelStatic<Model> & {
-        FIELDS: ModelAttributes<Model>;
-        MODEL_NAME: string;
-    })[];
-    commands: Record<string, (msg: Message, args: string[]) => Promise<void>>;
-};
-
-export function defineCommand({ help, models, commands }: CommandOptions) {
-    return async (sequelize: Sequelize, _client: Client) => {
-        for (const model of models) {
-            model.init(model.FIELDS, {
-                sequelize,
-                modelName: model.MODEL_NAME,
-            });
-        }
-
-        await Promise.all(models.map((model) => model.sync()));
-
-        commands.help = async (msg) => {
-            await msg.channel.send({
-                embeds: [embed().setDescription(help)],
-            });
-        };
-
-        return async (msg: Message, args: string[]) => {
-            const command = commands[args[0]];
-
-            if (command) {
-                await command(msg, args.slice(1));
-            } else {
-                await msg.channel.send(
-                    `No command "${args[0]}"\n\`!casino help\` to list all commands`
-                );
-            }
-        };
-    };
-}
 
 export const init = defineCommand({
     models: [Sentence],
+    name: "casino",
+    description: "Let fate decide",
     commands: {
-        async roll(msg, args) {
-            await Promise.resolve();
-            console.log({ msg, args });
-        },
+        roll: command({
+            description: "Roll 'top' level",
+            async handler(interaction) {
+                console.log({ t: 4, interaction });
+                await Promise.resolve();
+            },
+        }),
+        grouptest: group({
+            description: "grouptest group",
+            commands: {
+                a: command({
+                    description: "A subcommand",
+                    async handler(interaction) {
+                        console.log({ t: 5, interaction });
+                        await Promise.resolve();
+                    },
+                }),
+                roll: command({
+                    description: "Roll subcommand",
+                    async handler(interaction) {
+                        console.log({ t: 6, interaction });
+                        await Promise.resolve();
+                    },
+                }),
+            },
+        }),
     },
     help: "\
 A game of monopoly. You may roll once every 12 hours.\n\

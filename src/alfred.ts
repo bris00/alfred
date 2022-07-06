@@ -7,21 +7,25 @@
  * - Give card
  * - Tease bot
  * - Has posted verification daily
+ * - Porn game, users must post port (image or 60sec max gif) for vote, best/worst gets reward/punishment
+ *     - Easter egg hunt
  */
 
-import { Client, Message, Intents, MessageEmbed } from "discord.js";
+import { Client, CommandInteraction, Intents, MessageEmbed } from "discord.js";
 import { Sequelize, Transaction } from "sequelize";
+import { Routes } from "discord-api-types/v9";
+import { REST } from "@discordjs/rest";
 import { init as monopolyInit } from "./commands/monopoly";
 import { init as casinoInit } from "./commands/casino";
 import { Option } from "./option";
 import { Result } from "./result";
-import { call, reactionEmojis } from "./reactions";
+import { call } from "./reactions";
 import { AlfredReaction } from "./database/alfred";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Constructor<T> = new (...args: any[]) => T;
 
-export function downcastTo<T, R>(cls: Constructor<R>): (x: T) => Option<R> {
+export function downcastTo<R>(cls: Constructor<R>): <T>(x: T) => Option<R> {
     return (x) => {
         if (x instanceof cls) {
             return Option.some(x);
@@ -50,6 +54,10 @@ export async function transaction<T>(
     }
 }
 
+const rest = new REST({ version: "9" }).setToken(
+    Result.fromUndef(process.env.DISCORD_BOT_TOKEN).unwrap()
+);
+
 const client = new Client({
     intents: [
         Intents.FLAGS.DIRECT_MESSAGE_REACTIONS,
@@ -65,20 +73,12 @@ const client = new Client({
     partials: ["CHANNEL", "MESSAGE"],
 });
 
-client.on("ready", () => {
-    console.log(`Logged in as ${client.user?.tag || "N/A"}!`);
-});
-
-function handler<A>(handler: (x: A) => Promise<void>): (_: A) => Promise<void> {
-    return (x) => handler(x).catch(console.error);
-}
-
-const PREFIX = "!";
-
-type Command = (msg: Message, args: string[]) => Promise<void>;
-
-const COMMANDS: Promise<Record<string, Command | undefined>> = (async () => {
-    const commands = {};
+(async () => {
+    const commands = [];
+    const handlers: Record<
+        string,
+        (this: void, _: CommandInteraction) => Promise<void>
+    > = {};
 
     AlfredReaction.init(AlfredReaction.FIELDS, {
         sequelize: SEQUALIZE,
@@ -90,24 +90,54 @@ const COMMANDS: Promise<Record<string, Command | undefined>> = (async () => {
     if (process.env.ENABLE_MONOPOLY === "true") {
         const monopoly = await monopolyInit(SEQUALIZE);
 
-        Object.assign(commands, {
-            monopoly: monopoly,
-            m: monopoly,
-        });
+        commands.push(monopoly.commands);
+        handlers[monopoly.name] = monopoly.handler;
     }
 
     if (process.env.ENABLE_CASINO === "true") {
-        const casino = await casinoInit(SEQUALIZE, client);
+        const casino = await casinoInit(SEQUALIZE);
 
-        Object.assign(commands, {
-            casino,
-        });
+        commands.push(casino.commands);
+        handlers[casino.name] = casino.handler;
     }
 
-    return commands;
+    await rest.put(
+        Routes.applicationCommands(
+            Result.fromUndef(process.env.DISCORD_APP_ID).unwrap()
+        ),
+        { body: commands }
+    );
+
+    console.log("Successfully registered application commands.");
+
+    client.on("interactionCreate", async (interaction) => {
+        if (interaction.isMessageComponent()) {
+            const action = await AlfredReaction.findOne({
+                where: {
+                    uuid: interaction.customId,
+                },
+            });
+
+            if (action) {
+                await call(action, interaction);
+            }
+
+            return;
+        }
+
+        if (interaction.isCommand()) {
+            await handlers[interaction.commandName](interaction);
+
+            return;
+        }
+    });
 })().catch((e) => {
     console.error(e);
     process.exit(1);
+});
+
+client.on("ready", () => {
+    console.log(`Logged in as ${client.user?.tag || "N/A"}!`);
 });
 
 export const EMPTY_VALUE = "\u200B";
@@ -123,39 +153,6 @@ export const EMPTY_INLINE_FIELD = {
     value: EMPTY_VALUE,
     inline: true,
 };
-
-client.on(
-    "messageCreate",
-    handler(async (msg) => {
-        if (!msg.author.bot && msg.content.startsWith(PREFIX)) {
-            const args = msg.content.trim().slice(1).split(/ +/);
-            const command = (await COMMANDS)[args[0]];
-
-            if (command) {
-                await command(msg, args.slice(1));
-            }
-        }
-    })
-);
-
-client.on("messageReactionAdd", async (reaction, user) => {
-    if (
-        !user.bot &&
-        reaction.emoji?.name &&
-        reactionEmojis().has(reaction.emoji.name)
-    ) {
-        const action = await AlfredReaction.findOne({
-            where: {
-                messageId: reaction.message.id,
-                emoji: reaction.emoji.name,
-            },
-        });
-
-        if (action) {
-            await call(action, user, reaction);
-        }
-    }
-});
 
 client.login(process.env.DISCORD_BOT_TOKEN).catch((e) => {
     console.error(e);

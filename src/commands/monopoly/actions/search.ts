@@ -100,15 +100,14 @@ export async function search(
         }
     }
 
-    const members = await ctx.channel.lastMessage?.guild?.members.fetch({
+    const members = await ctx.guild.members.fetch({
         query: term,
     });
 
-    const memberTargets =
-        members?.map((m) => ({
-            term: m.displayName,
-            displayable: displayMember(m),
-        })) || [];
+    const memberTargets = members.map((m) => ({
+        term: m.displayName,
+        displayable: displayMember(m),
+    }));
 
     const results = go(term, TARGETS.concat(memberTargets), {
         limit: 1,
@@ -116,5 +115,5 @@ export async function search(
         key: "term",
     });
 
-    return Option.fromMaybeUndef(results[0]?.obj.displayable);
+    return Option.fromUndef(results[0]?.obj.displayable);
 }

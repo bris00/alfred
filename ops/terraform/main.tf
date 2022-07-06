@@ -79,12 +79,16 @@ module "gce-container" {
   version = "3.0.0"
 
   container = {
-    image = "europe-west1-docker.pkg.dev/alfred-354216/alfred/alfred:latest@sha256:9fec377309138413f69a2357c7c0f8de20515cabad3bbbdf54d271b0957475fc"
+    image = "europe-west1-docker.pkg.dev/alfred-354216/alfred/alfred:latest@bris00/alfred2sha256:9fec377309138413f69a2357c7c0f8de20515cabad3bbbdf54d271b0957475fc"
 
     env = [
       {
         name = "DISCORD_BOT_TOKEN"
         value = data.sops_file.alfred-env.data["DISCORD_BOT_TOKEN"]
+      },
+      {
+        name = "DISCORD_APP_ID"
+        value = "810534752338706432"
       },
       {
         name = "DATABASE_CONNECTION_URI"

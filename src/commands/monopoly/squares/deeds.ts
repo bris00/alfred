@@ -153,17 +153,17 @@ export class Deed implements Square, Mortagable, Purchasable, Tradable {
         return Result.collapse(result.mapErr((x) => x.toString()));
     }
 
-    async display({ game, channel }: Context): Promise<DisplayResult> {
+    async display(ctx: Context): Promise<DisplayResult> {
         const deed = await MonopolyDeed.findOne({
             where: {
-                gameId: game.gameId,
-                channelId: game.channelId,
+                gameId: ctx.game.gameId,
+                channelId: ctx.game.channelId,
                 deedName: this.name,
             },
         });
 
         const user = await Option.promise(
-            Option.fromFalsy(deed?.userId).map((id) => findMember(channel, id))
+            Option.fromFalsy(deed?.userId).map((id) => findMember(ctx, id))
         );
 
         return {
@@ -241,36 +241,36 @@ export class Deed implements Square, Mortagable, Purchasable, Tradable {
             reactions: ReactionInstanceList.create([
                 {
                     reaction: buy,
-                    args: [this.square],
+                    args: [this.square, ctx.game.channelId, ctx.game.gameId],
                 },
                 {
                     reaction: buyHouse,
-                    args: [this.square],
+                    args: [this.square, ctx.game.channelId, ctx.game.gameId],
                 },
                 {
                     reaction: buyHotel,
-                    args: [this.square],
+                    args: [this.square, ctx.game.channelId, ctx.game.gameId],
                 },
                 {
                     reaction: mortage,
-                    args: [this.square],
+                    args: [this.square, ctx.game.channelId, ctx.game.gameId],
                 },
             ]),
         };
     }
 
-    async land({ player, channel }: Context): Promise<EmbedField[]> {
+    async land(ctx: Context): Promise<EmbedField[]> {
         const result = await transaction(async (transaction) => {
             const deed = await MonopolyDeed.findOne({
                 transaction,
                 where: {
-                    gameId: player.gameId,
-                    channelId: player.channelId,
+                    gameId: ctx.player.gameId,
+                    channelId: ctx.player.channelId,
                     deedName: this.name,
                 },
             });
 
-            if (!deed || deed.userId === player.userId) {
+            if (!deed || deed.userId === ctx.player.userId) {
                 return [];
             }
 
@@ -297,8 +297,8 @@ export class Deed implements Square, Mortagable, Purchasable, Tradable {
             const owner = await MonopolyPlayer.findOne({
                 transaction,
                 where: {
-                    gameId: player.gameId,
-                    channelId: player.channelId,
+                    gameId: ctx.player.gameId,
+                    channelId: ctx.player.channelId,
                     userId: deed.userId,
                 },
             });
@@ -308,14 +308,14 @@ export class Deed implements Square, Mortagable, Purchasable, Tradable {
             }
 
             owner.balance += rent;
-            player.balance -= rent;
+            ctx.player.balance -= rent;
 
             await Promise.all([
                 owner.save({ transaction }),
-                player.save({ transaction }),
+                ctx.player.save({ transaction }),
             ]);
 
-            const ownerMember = await findMember(channel, owner.userId);
+            const ownerMember = await findMember(ctx, owner.userId);
 
             return [
                 EMPTY_FIELD,

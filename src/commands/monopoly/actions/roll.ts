@@ -1,14 +1,8 @@
 import { Result } from "@/result";
 import {
-    DMChannel,
+    CommandInteraction,
+    MessageComponentInteraction,
     MessageEmbed,
-    NewsChannel,
-    PartialDMChannel,
-    PartialUser,
-    TextChannel,
-    ThreadChannel,
-    User,
-    VoiceChannel,
 } from "discord.js";
 import { DICE, MAX_SQUARES } from "..";
 import { DEEDS } from "../squares/deeds";
@@ -33,7 +27,7 @@ function addSquares<T extends Square>(sx: Iterable<T>) {
 }
 
 export function findSquare(square: number): Option<Square> {
-    return Option.fromMaybeUndef(SQUARES[square]);
+    return Option.fromUndef(SQUARES[square]);
 }
 
 addSquares([new Jail(), new GoToJail(), new Start()]);
@@ -55,24 +49,19 @@ const DEFAULT_ACTION: Square = {
 };
 
 export async function roll(
-    user: User | PartialUser,
-    channel:
-        | TextChannel
-        | DMChannel
-        | NewsChannel
-        | PartialDMChannel
-        | ThreadChannel
-        | VoiceChannel
+    interaction: CommandInteraction | MessageComponentInteraction,
+    gameChannelId: string,
+    gameId: number
 ): Promise<Result<void, string>> {
     const reactions = ReactionInstanceList.create([]);
 
-    const context = await getContext(user.id, channel);
+    const context = await getContext(interaction, gameChannelId, gameId);
 
     if (context.isErr()) {
         return Result.err(context.unwrapErr());
     }
 
-    const { player, game } = context.unwrap();
+    const { player, game, guild } = context.unwrap();
 
     if (new Date() < player.nextTurn) {
         return Result.err("You can't do that yet");
@@ -121,12 +110,12 @@ export async function roll(
         }
 
         const square = SQUARES[player.currentSquare] || DEFAULT_ACTION;
-        const res = await square.display({ game, channel });
+        const res = await square.display({ game, guild });
 
         card = res.embed;
         reactions.extend(res.reactions);
 
-        const fields = await square.land({ player, game, channel });
+        const fields = await square.land({ player, game, guild });
         card.addFields(...fields);
     }
 
@@ -135,7 +124,7 @@ export async function roll(
 
         reactions.add({
             reaction: rollAgain,
-            args: [],
+            args: [gameChannelId, gameId],
         });
     } else {
         const future = new Date();
@@ -146,11 +135,15 @@ export async function roll(
     await player.save();
 
     card = card || embed();
-    card.setTitle(`${user.username || "unknown user"} rolling`);
+    card.setTitle(`${interaction.user.username || "unknown user"} rolling`);
     card.setDescription(`Rolled ${roll1} and ${roll2}\n${info}`);
 
-    const sent = await channel.send({ embeds: [card] });
-    await reactions.addToMessage(sent);
+    const { components } = await reactions.createComponents();
+
+    await interaction.reply({
+        embeds: [card],
+        components: components,
+    });
 
     return Result.ok(undefined);
 }

@@ -6,16 +6,9 @@ import { Option } from "@/option";
 import { ReactionInstanceList } from "@/reactions";
 import { Result } from "@/result";
 import {
-    DMChannel,
-    Message,
-    NewsChannel,
-    PartialDMChannel,
-    PartialMessage,
-    PartialUser,
-    TextChannel,
-    ThreadChannel,
+    CommandInteraction,
+    MessageComponentInteraction,
     User,
-    VoiceChannel,
 } from "discord.js";
 import { go, prepare } from "fuzzysort";
 import { Tradable, TradableArgs, TradableKey } from "../interfaces/trade";
@@ -109,52 +102,59 @@ export class Trade {
         this.parties = data.parties;
     }
 
-    async click(msg: Message | PartialMessage) {
-        const [yes, no] = await Promise.all([
-            msg.reactions.cache.get("✅")?.users.fetch(),
-            msg.reactions.cache.get("❌")?.users.fetch(),
-        ]);
-
-        const filter = (user: User) => {
-            return [this.parties.from.id, this.parties.to.id].some(
-                (id) => id === user.id
-            );
-        };
-
-        const numYes = yes?.filter(filter).size || 0;
-        const numNo = no?.filter(filter).size || 0;
-
-        if (numNo > 0) {
-            await this.cancel(msg);
-        } else if (numYes >= 2) {
-            await this.execute(msg);
+    async click(
+        accept: boolean,
+        interaction: MessageComponentInteraction,
+        gameChannelId: string,
+        gameId: number
+    ) {
+        if (
+            interaction.user.id in [this.parties.from.id, this.parties.to.id] &&
+            !accept
+        ) {
+            await this.cancel(interaction);
+        } else if (interaction.user.id === this.parties.to.id && accept) {
+            await this.execute(interaction, gameChannelId, gameId);
         }
     }
 
-    async execute(msg: Message | PartialMessage) {
-        const fromPlayer = await getPlayer(this.parties.from.id, msg.channel);
-        const toPlayer = await getPlayer(this.parties.to.id, msg.channel);
+    async execute(
+        interaction: MessageComponentInteraction,
+        gameChannelId: string,
+        gameId: number
+    ) {
+        const fromPlayer = await getPlayer(
+            this.parties.from.id,
+            gameChannelId,
+            gameId
+        );
+
+        const toPlayer = await getPlayer(
+            this.parties.to.id,
+            gameChannelId,
+            gameId
+        );
 
         if (fromPlayer.isErr()) {
-            await msg.channel.send(fromPlayer.unwrapErr());
+            await interaction.reply(fromPlayer.unwrapErr());
             return;
         }
 
         if (toPlayer.isErr()) {
-            await msg.channel.send(toPlayer.unwrapErr());
+            await interaction.reply(toPlayer.unwrapErr());
             return;
         }
 
         await AlfredReaction.destroy({
             where: {
-                messageId: msg.id,
+                messageId: interaction.message.id,
             },
         });
 
         const result = await transaction<string>(async (transaction) => {
             await Promise.all([
                 ...this.items.from.map(async (item) => {
-                    const tradable = Option.fromMaybeUndef(
+                    const tradable = Option.fromUndef(
                         tradables().get(item.key)
                     ).unwrap();
 
@@ -166,7 +166,7 @@ export class Trade {
                     });
                 }),
                 ...this.items.to.map(async (item) => {
-                    const tradable = Option.fromMaybeUndef(
+                    const tradable = Option.fromUndef(
                         tradables().get(item.key)
                     ).unwrap();
 
@@ -179,28 +179,40 @@ export class Trade {
                 }),
             ]);
 
-            await msg.edit({ embeds: [this.embed(Status.ACCEPTED)] });
-
             return "Trade complete";
         });
 
         if (result.isErr()) {
-            await msg.edit({ embeds: [this.embed(Status.FAILED)] });
-            await msg.channel.send(result.unwrapErr().toString());
+            if ("edit" in interaction.message) {
+                await interaction.message.edit({
+                    embeds: [this.embed(Status.FAILED)],
+                });
+            }
+
+            await interaction.reply(result.unwrapErr().toString());
         } else {
-            await msg.edit({ embeds: [this.embed(Status.ACCEPTED)] });
-            await msg.channel.send(result.unwrap());
+            if ("edit" in interaction.message) {
+                await interaction.message.edit({
+                    embeds: [this.embed(Status.ACCEPTED)],
+                });
+            }
+
+            await interaction.reply(result.unwrap());
         }
     }
 
-    async cancel(msg: Message | PartialMessage) {
+    async cancel(interaction: MessageComponentInteraction) {
         await AlfredReaction.destroy({
             where: {
-                messageId: msg.id,
+                messageId: interaction.message.id,
             },
         });
 
-        await msg.edit({ embeds: [this.embed(Status.CANCELED)] });
+        if ("edit" in interaction.message) {
+            await interaction.message.edit({
+                embeds: [this.embed(Status.CANCELED)],
+            });
+        }
     }
 
     embed(status: Status) {
@@ -289,15 +301,10 @@ function parseTradeString(trade: string): Option<TradeItems> {
 }
 
 export async function trade(
-    user: User | PartialUser,
-    channel:
-        | TextChannel
-        | DMChannel
-        | NewsChannel
-        | PartialDMChannel
-        | ThreadChannel
-        | VoiceChannel,
-    partner: string,
+    interaction: CommandInteraction,
+    gameChannelId: string,
+    gameId: number,
+    partner: User,
     trade: string
 ): Promise<Result<void, string>> {
     const items = parseTradeString(trade);
@@ -306,40 +313,30 @@ export async function trade(
         return Result.err("Bad trade arguments");
     }
 
-    const context = await getContext(user.id, channel);
+    const context = await getContext(interaction, gameChannelId, gameId);
 
     if (context.isErr()) {
         return Result.err(context.unwrapErr());
     }
 
-    const { player } = context.unwrap();
-
-    const members = await channel.lastMessage?.guild?.members.fetch({
-        query: partner,
-        limit: 1,
-    });
-
-    const member = members?.first();
-
-    if (!member) {
-        return Result.err("Could not find member " + partner);
-    }
+    const { player, guild, game } = context.unwrap();
 
     const tradee = await MonopolyPlayer.findOne({
         where: {
-            userId: member.id,
+            userId: partner.id,
             gameId: player.gameId,
             channelId: player.channelId,
         },
     });
 
     if (!tradee) {
-        return Result.err(
-            member.displayName + " is not playing in current game"
-        );
+        return Result.err(`${partner.username} is not playing in current game`);
     }
 
-    const playerMember = await findMember(channel, player.userId);
+    const playerMember = await findMember(
+        { game, guild, player },
+        player.userId
+    );
 
     if (playerMember.isNone()) {
         return Result.err(
@@ -357,26 +354,27 @@ export async function trade(
                 name: trader.displayName,
             },
             to: {
-                id: member.id,
-                name: member.displayName,
+                id: partner.id,
+                name: partner.username,
             },
         },
     };
 
-    const msg = await channel.send({
-        embeds: [new Trade(data).embed(Status.PENDING)],
-    });
-
-    await ReactionInstanceList.create([
+    const { components } = await ReactionInstanceList.create([
         {
             reaction: acceptTrade,
-            args: [data],
+            args: [data, gameChannelId, gameId],
         },
         {
             reaction: cancelTrade,
-            args: [data],
+            args: [data, gameChannelId, gameId],
         },
-    ]).addToMessage(msg);
+    ]).createComponents();
+
+    await interaction.reply({
+        embeds: [new Trade(data).embed(Status.PENDING)],
+        components,
+    });
 
     return Result.ok(void 0);
 }
